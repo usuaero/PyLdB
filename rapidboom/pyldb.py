@@ -5,7 +5,6 @@ PyLdB
 
 import numpy as np
 import matplotlib.pyplot as plt
-import pandas
 import scipy.integrate as integrate
 import time
 #plt.style.use('//home//christian//.cache//matplotlib//aiaapaper.mplstyle')
@@ -319,7 +318,3 @@ def PyLdB(T,P):
     t1 = time.time()
     print(t1-t0)
     return PLdB
-
-T,P = Import("panair_r1.sig")
-PyLdB(T,P)
-#Percevals(T,P)
