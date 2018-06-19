@@ -134,16 +134,8 @@ def FFT_spectrum(T, P, f_c, f_l, f_u):
     freq = np.fft.fftfreq(N)/dt
     freqOneSide = np.copy(freq[0:N//2-1])
     Power = (np.abs(FFT)**2)*(dt**2)
-    ParsevalsTheorem(Power, freq, T, P, N)
     freqOne, PowerOne = Power_interp(freqOneSide, Power, N, f_l, f_u)
     return freqOne, PowerOne
-
-
-def ParsevalsTheorem(Power, freq, T, P, N):
-    pars_t = T*(10**-3)
-    pars_p = np.abs(P)**2
-    pars_t_check = integrate.trapz(pars_p, pars_t)
-    pars_e_check = 2.*integrate.trapz(Power[:N//2-1], x=freq[:N//2-1])
 
 
 def Power_interp(freqOneSide, Power, N, f_l, f_u):
