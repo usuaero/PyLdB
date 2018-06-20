@@ -1,6 +1,54 @@
 # -*- coding: utf-8 -*-
-"""
-PyLdB
+"""A perceived loudness (PLdB) calculator.
+
+PyLdB implements Stevens' Mark VII procedure for the calculation of the
+perceived loudness of a pressure signature.
+
+Routine Listings
+-----------------
+Tables()    Returns lists containing values used in the calculation of PLdB.
+
+PerceivedLoudness(T, P[, pad_f, pad_r])     Implements Mark VII procedure.
+
+window(P, xpoints)     Applies a Hanning window to the pressure data.
+
+padding(T, P, fp, rp)     Applies a zero padding to the front and rear of the
+                          pressure signature.
+LoudLimits400(fc, L_l, L,u, L, X)     Chooses an appropriate equivalent
+                                      loudness transformation according to dB
+                                      limits.
+FFT_spectrum(T, P, f_c, f_l, f_u)     Performs an FFT on the pressure signature
+                                      and generates the power spectral density
+                                      values.
+Power_interp(freqOneside, Power, N, f_l, f_u)     Interpolates power data to
+                                                  match frequency band
+                                                  boundaries.
+SPL(freqOne, PowerOne, f_l, f_u, f_bins)     Calculates the sound pressure
+                                             level of each frequency band.
+Equivalent_Loudness(L, f_c, f_bins)     Calculates equivalent loudness values.
+
+PyLdB(T, P)     Main routine. Calculates and displays perceived loudness in
+                PLdB.
+
+See Also
+--------
+numpy.interp : Linear interpolation for lists
+numpy.hanning : Calculates a Hanning window given a number of points
+numpy.pad : Zero-pads a list
+numpy.fft.fft : Fast Fourier transform (FFT) routine
+numpy.fft.fftfreq : Generates frequency range for FFT
+numpy.argsort : Returns indices to sort an array
+numpy.nonzero : Returns non-zero elements in an array subject to conditions
+scipy.integrate.trapz : Performs trapezoidal numerical integration
+
+Notes
+------
+The Mark VII procedure for the calculation of perceived loudness transforms
+the sound pressure levels of one-third octave frequency bands into equivalent
+3150 Hz loudness values.
+references
+examples
+
 """
 
 import numpy as np
@@ -74,7 +122,7 @@ def Tables():
     return Leqrange, SonesL, SonesF, F, f_center, f_l, f_u
 
 
-def PerceivedLoudness(T, P, *, pad_f=10, pad_r=10):
+def PerceivedLoudness(T, P, pad_f=10, pad_r=10):
     # Imports tabulated values to be used
     Leqrange, SonesL, SonesF, F, f_center, f_l, f_u = Tables()
 
@@ -204,7 +252,6 @@ def Equivalent_Loudness(L, f_c, f_bins):
 
 
 def PyLdB(T, P):
-    np.set_printoptions(threshold=np.nan)
     PLdB = PerceivedLoudness(T, P)
     print(PLdB, "PLdB")
     return PLdB
