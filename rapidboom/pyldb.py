@@ -96,7 +96,82 @@ import scipy.integrate as integrate
 
 
 def perceivedloudness(time, pressure,
-                      pad_front=10, pad_rear=10, len_window=800):
+                      pad_front=1, pad_rear=1, len_window=800):
+    r"""Calculates the perceived loudness using time and pressure values in
+    miliseconds and lb/ft^2 (psf) respectively.
+
+    This function encapsulates all of the calculation steps to return a
+    perceived loudness value given two arrays for time and pressure. The
+    pressure signature is first windowed using a Hanning window to ensure
+    a complete cycle can be formed for use in a fast Fourier transform (FFT).
+    Next, the time and pressure arrays are zero-padded to increase the
+    resolution of the FFT output.
+
+    Using the windowed and zero-padded pressure and time arrays, a one-sided
+    power spectrum is produced. The energy in the power spectrum can then be
+    calculated using a trapezoidal rule numerical integration algorithm.
+    The energy is then used to find a sound pressure level in decibels for
+    one-third octave frequency bands (stored as global constants).
+
+    Stevens' Mark VII algorithm then transforms the sound pressure levels for
+    each of the frequency bands into an equivalent loudness value with a 3150
+    Hz reference frequency. The equivalent loudness values are then used with a
+    table for conversion from decibels to sones (stored as a global constant).
+    A summation parameter is likewise found using tabulated data from Stevens.
+    Finally, a summation rule is used to find the total loudness, which is
+    used alongside a power-rule to calculate the perceived loudness in PLdB.
+
+    Parameters
+    ----------
+    time : array_like
+        An array containing a time signature to be used in the calculation of
+        the perceived loudness. This array should be sampled at a constant
+        frequency. It should have the same number of points and the same
+        spacing as the `pressure` parameter.
+    pressure : array_like
+        An array containing a pressure signature to be used in the calculation
+        of the perceived loudness. This array should be sampled at a constant
+        frequency. It should have the same number of points and the same
+        spacing as the `time` parameter.
+    pad_front : int, optional
+        Defaults to 1. This parameter specifies the length of the zero-padding
+        that will be applied to the font of the `time` and `pressure` arrays.
+        For example, if `pad_front`=10, the length of the array of zeros added
+        to the front of the `time` and `pressure` arrays will be equal to 10x
+        the length of the `time` and `pressure` arrays.
+    pad_front : int, optional
+        Defaults to 1. This parameter specifies the length of the zero-padding
+        that will be applied to the font of the `time` and `pressure` arrays.
+        For example, if `pad_front`=10, the length of the array of zeros added
+        to the front of the `time` and `pressure` arrays will be equal to 10x
+        the length of the `time` and `pressure` arrays.
+    len_window : int, optional
+        Defaults to 800 points. This parameter specifies the number of points
+        over which the Hanning window will be applied on both the front and the
+        rear of the signal. In other words, the front 800 points of the
+        'pressure' array will be windowed with the first 800 points of a 1600
+        point Hanning window, and the last 800 points of the `pressure` array
+        will be windowed with the last 800 points of a 1600 point Hanning
+        window.
+
+    Returns
+    -------
+    pldb : float
+        Value for perceived loudness in units of PLdB.
+
+    Examples
+    --------
+    These are written in doctest format, and should illustrate how to
+    use the function.
+
+    >>> import pyldb
+    >>> import numpy as np
+    >>> time = np.linspace(0,100,num=10000) # Any time array in miliseconds
+    >>> pressure = np.linspace(0,100,num=10000) # Any pressure array in psf
+    >>> PLdB = pyldb.perceivedloudness(time, pressure, pad_front=4,pad_rear=4,
+                                       len_window=1000)
+    >>> print PLdB
+    """
     # Initialize variables
     n_bins = len(BAND_CENTERS)
     frontpad = len(pressure)*pad_front
@@ -109,8 +184,8 @@ def perceivedloudness(time, pressure,
     energy, loudness = _sound_pressure_levels(freq, power, n_bins)
     L_eq = _equivalent_loudness(loudness, n_bins)
     total_loudness = _calc_total_loudness(L_eq)
-    PLdB = 32.0 + 9.0*np.log2(total_loudness)
-    return PLdB
+    pldb = 32.0 + 9.0*np.log2(total_loudness)
+    return pldb
 
 
 def _window(dataset, len_window):
@@ -146,13 +221,15 @@ def _power_spectrum(time, pressure):
     freq = np.fft.fftfreq(N)/dt
     Power = (np.abs(FFT)**2)*(dt**2)
     freqOne, PowerOne = _power_interp(freq, Power, N)
+    print(max(PowerOne))
     return freqOne, PowerOne
 
 
 def _power_interp(freq, power, N):
     # Convert double sided Power Spectrum to single sided
-    freq_one_side = np.copy(freq[0:N//2-1])
-    power_one_side = np.copy(power[0:N//2-1])
+    freq_one_side = np.copy(freq[0:N//2])
+    power[1:N//2] = 2.*power[1:N//2]
+    power_one_side = np.copy(power[0:N//2])
 
     # Interpolate values corresponding to band limits
     interp_freq = np.append(BAND_LOWER_LIMITS, BAND_UPPER_LIMITS[-1])
@@ -217,8 +294,9 @@ def _equivalent_loudness(L, n_bins):
                 L_eq[i] = _loud_limits_400(BAND_CENTERS[i],
                                            85.0, 130.0, L[i], 9.0)
         if i <= 19:
-            L_eq_B = 160.0
-            -((160.0 - L[i])*np.log10(80.0))/np.log10(BAND_CENTERS[i])
+            numerator = ((160.0 - L[i])*np.log10(80.0))
+            denominator = np.log10(BAND_CENTERS[i])
+            L_eq_B = 160.0 - numerator/denominator
             L_eq[i] = _loud_limits_400(80.0, 86.5, 131.5, L_eq_B, 10.5)
     return L_eq
 
@@ -292,15 +370,15 @@ SUMMATION_FACTORS = [0.100, 0.122, 0.140, 0.158, 0.174,
                      0.205, 0.208, 0.210, 0.212, 0.215,
                      0.217, 0.219, 0.221, 0.223, 0.224,
                      0.225, 0.226, 0.227, 0.227, 0.227]
-BAND_CENTERS = [1.000000000001, 1.26, 1.58, 2.0, 2.51, 3.16,
-                3.98, 5.01, 6.31, 7.94, 10.,
-                12.59, 15.85, 19.95, 25.12, 31.62,
-                39.81, 50.12, 63.10, 79.43, 100.,
-                125.89, 158.49, 199.53, 251.19, 316.23,
-                398.11, 501.19, 630.96, 794.33, 1000.,
-                1258.9, 1584.9, 1995.3, 2511.9, 3162.3,
-                3981.1, 5011.9, 6309.6, 7943.3, 10000.,
-                12589.3]
+BAND_CENTERS = [1.0000001, 1.25, 1.6, 2.0, 2.5, 3.15,
+                4., 5., 6.3, 8., 10.,
+                12.5, 16., 20., 25., 31.5,
+                40., 50., 63., 80., 100.,
+                125., 160., 200., 250., 315.,
+                400., 500., 630., 800., 1000.,
+                1250., 1600., 2000., 2500., 3150.,
+                4000., 5000., 6300., 8000., 10000.,
+                12500.]
 BAND_LOWER_LIMITS = [0.89, 1.12, 1.41, 1.78, 2.24, 2.82,
                      3.55, 4.47, 5.62, 7.08, 8.91,
                      11.2, 14.1, 17.8, 22.4, 28.2,
