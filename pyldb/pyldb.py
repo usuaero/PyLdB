@@ -188,6 +188,42 @@ def perceivedloudness(time, pressure,
     return pldb
 
 
+def import_sig(filename, header_lines=0):
+    r"""Imports time and pressure data from a file provided by the user.
+
+    Any file type that is compatible with numpy's genfromtxt method can be used
+    with this function. The time data should be contained in the left-most
+    column of the file, and the pressure data should be contained in the right-
+    most column. Header lines should be skipped using the `header_lines`
+    parameter.
+
+    Parameters
+    ----------
+    filename : string
+        Contains the name of the file from which the time and pressure data
+        will be imported.
+    header_lines : int, optional
+        Specifies how many lines containing header information should be
+        skipped when reading the file data.
+
+    Returns
+    -------
+    time : array_like
+        Array containing the time data imported from the file.
+    pressure : array_like
+        Array containing the pressure data imported from the file.
+
+    Examples
+    --------
+    >>> import pyldb
+    >>> time, pressure = pyldb.import_sig("Testsig.sig", header_lines=3)
+    """
+    data = np.genfromtxt(filename, skip_header=header_lines)
+    time = data[:, 0]
+    pressure = data[:, 1]
+    return time, pressure
+
+
 def _window(dataset, len_window):
     win = np.hanning(len_window*2)
     windowed_data = np.copy(dataset)
