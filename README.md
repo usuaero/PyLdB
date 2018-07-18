@@ -56,7 +56,7 @@ Unit tests are implemented using the pytest module and are run using the followi
 
 ## Support
 
-Contact doug.hunsaker@usu.edu with any questions.
+Contact doug.hunsaker@usu.edu or christian.bolander@aggiemail.usu.edu with any questions.
 
 ## License
 
