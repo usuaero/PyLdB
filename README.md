@@ -17,7 +17,7 @@ signature.
 import pyldb
 
 time, pressure = pyldb.import_sig("pyldb_sig1.sig", header_lines=3)
-PLdB = pyldb.perceivedloudness(time, pressure, front_pad=10, rear_pad=10)
+PLdB = pyldb.perceivedloudness(time, pressure, pad_front=10, pad_rear=10)
 
 print(PLdB)
 ```
@@ -43,7 +43,7 @@ You can either download the source as a ZIP file and extract the contents or clo
 4. Select `Download ZIP`
 5. Extract the downloaded ZIP file to a local directory on your machine
 
-###Cloning the Github repository
+### Cloning the Github repository
 
 1. From the command prompt, navigate to the directory where pyldb will be installed
 2. `git clone https://github.com/usuaero/pyldb`
