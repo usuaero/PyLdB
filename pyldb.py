@@ -257,7 +257,6 @@ def _power_spectrum(time, pressure):
     freq = np.fft.fftfreq(N)/dt
     Power = (np.abs(FFT)**2)*(dt**2)
     freqOne, PowerOne = _power_interp(freq, Power, N)
-    print(max(PowerOne))
     return freqOne, PowerOne
 
 

@@ -50,9 +50,9 @@ You can either download the source as a ZIP file and extract the contents or clo
 
 ## Testing
 
-Unit tests are implemented using the pytest module and are run using the following command.
+Unit tests are implemented using the pytest module and are run using the following command in the base directory.
 
-`python3 -m pytest test/`
+`pytest test.py`
 
 ## Support
 
