@@ -188,7 +188,7 @@ def perceivedloudness(time, pressure,
     return pldb
 
 
-def import_sig(filename, header_lines=0, delimiter=' '):
+def import_sig(filename, header_lines=0, delimiter=None):
     r"""Imports time and pressure data from a file provided by the user.
 
     Any file type that is compatible with numpy's genfromtxt method can be used
@@ -292,7 +292,7 @@ def _sound_pressure_levels(freq, power, n_bins):
             frequency_section = freq[i_section]
             energy[j] = integrate.trapz(power_section, x=frequency_section)
     energy /= t_crit
-    loudness = 10*np.log10(energy/(po**2)) - 3
+    loudness = 10*np.log10(energy/(2.*(po**2)))
     return energy, loudness
 
 
