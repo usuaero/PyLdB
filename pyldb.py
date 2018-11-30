@@ -139,7 +139,7 @@ def perceivedloudness(time, pressure,
         For example, if `pad_front`=10, the length of the array of zeros added
         to the front of the `time` and `pressure` arrays will be equal to 10x
         the length of the `time` and `pressure` arrays.
-    pad_front : int, optional
+    pad_rear : int, optional
         Defaults to 1. This parameter specifies the length of the zero-padding
         that will be applied to the font of the `time` and `pressure` arrays.
         For example, if `pad_front`=10, the length of the array of zeros added
