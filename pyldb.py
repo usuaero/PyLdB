@@ -292,7 +292,7 @@ def _sound_pressure_levels(freq, power, n_bins):
             frequency_section = freq[i_section]
             energy[j] = integrate.trapz(power_section, x=frequency_section)
     energy /= t_crit
-    loudness = 10*np.log10(energy/(2.*(po**2)))
+    loudness = 10*np.log10(energy/(po**2)) - 3
     return energy, loudness
 
 
