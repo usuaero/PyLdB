@@ -1,16 +1,6 @@
 import numpy as np
 
-"""A perceived loudness (PLdB) calculator.
-
-PyLdB implements Stevens' Mark VII procedure for the calculation of the
-perceived loudness of a pressure signature.
-
-Routine Listings
------------------
-PerceivedLoudness(time, pressure[, pad_f, pad_r, len_window])
-Main routine. Calculates and displays perceived loudness in PLdB.
-
-
+"""Method to process calcualte loudness levels (e.g., annoyance, DNL).
 
 References
 -----------
