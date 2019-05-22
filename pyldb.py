@@ -93,10 +93,12 @@ print(PLdB)
 
 import numpy as np
 import scipy.integrate as integrate
+import os
 
 
 def perceivedloudness(time, pressure,
-                      pad_front=1, pad_rear=1, len_window=800):
+                      pad_front=1, pad_rear=1,
+                      len_window=800, print_results=False):
     r"""Calculates the perceived loudness using time and pressure values in
     miliseconds and lb/ft^2 (psf) respectively.
 
@@ -183,8 +185,22 @@ def perceivedloudness(time, pressure,
     freq, power = _power_spectrum(time_pad, pressure_pad)
     energy, loudness = _sound_pressure_levels(freq, power, n_bins)
     L_eq = _equivalent_loudness(loudness, n_bins)
-    total_loudness = _calc_total_loudness(L_eq)
+    total_loudness, sones = _calc_total_loudness(L_eq)
     pldb = 32.0 + 9.0*np.log2(total_loudness)
+    if print_results:
+        directory = './PyLdB_Results'
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        np.savetxt(directory + '/final_sig',
+                   np.array([time_pad, pressure_pad]).T)
+        np.savetxt(directory + '/power_spec',
+                   np.array([freq, power]).T)
+        np.savetxt(directory + '/sound_pressure_levels',
+                   np.array([BAND_CENTERS, loudness]).T)
+        np.savetxt(directory + '/equivalent_loudness',
+                   np.array([BAND_CENTERS, L_eq]).T)
+        np.savetxt(directory + '/sones',
+                   np.array([BAND_CENTERS, sones]).T)
     return pldb
 
 
@@ -353,7 +369,7 @@ def _calc_total_loudness(L_eq):
     sum_f_max = np.interp(sones.max(), SONES_F, SUMMATION_FACTORS,
                           left=0.0, right=SUMMATION_FACTORS[-1])
     total_loudness = sones.max() + sum_f_max*(sum(sones) - sones.max())
-    return total_loudness
+    return total_loudness, sones
 
 
 L_EQ_RANGE = np.arange(1, 141, 1)
