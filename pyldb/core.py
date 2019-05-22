@@ -141,7 +141,7 @@ def perceivedloudness(time, pressure,
         For example, if `pad_front`=10, the length of the array of zeros added
         to the front of the `time` and `pressure` arrays will be equal to 10x
         the length of the `time` and `pressure` arrays.
-    pad_front : int, optional
+    pad_rear : int, optional
         Defaults to 1. This parameter specifies the length of the zero-padding
         that will be applied to the font of the `time` and `pressure` arrays.
         For example, if `pad_front`=10, the length of the array of zeros added
@@ -204,7 +204,7 @@ def perceivedloudness(time, pressure,
     return pldb
 
 
-def import_sig(filename, header_lines=0):
+def import_sig(filename, header_lines=0, delimiter=None):
     r"""Imports time and pressure data from a file provided by the user.
 
     Any file type that is compatible with numpy's genfromtxt method can be used
@@ -234,7 +234,8 @@ def import_sig(filename, header_lines=0):
     >>> import pyldb
     >>> time, pressure = pyldb.import_sig("Testsig.sig", header_lines=3)
     """
-    data = np.genfromtxt(filename, skip_header=header_lines)
+    data = np.genfromtxt(filename, skip_header=header_lines,
+                         delimiter=delimiter)
     time = data[:, 0]
     pressure = data[:, 1]
     return time, pressure
