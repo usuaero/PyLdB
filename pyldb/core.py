@@ -155,6 +155,15 @@ def perceivedloudness(time, pressure,
         point Hanning window, and the last 800 points of the `pressure` array
         will be windowed with the last 800 points of a 1600 point Hanning
         window.
+    print_results : bool, optional
+        Defaults to False. This parameter acts as a flag to output several
+        meaningful results from the analysis performed by PyLdB. The results
+        printed include the padded and windowed signature passed into the
+        loudness calculator as well as the power spectrum of the signature, and
+        the sound pressure level, equivalent loudness, and sone values
+        associated with each frequency band. These results are placed in a
+        directory called `PyLdB_Results` and are useful for analysis of the
+        signature.
 
     Returns
     -------
@@ -187,6 +196,8 @@ def perceivedloudness(time, pressure,
     L_eq = _equivalent_loudness(loudness, n_bins)
     total_loudness, sones = _calc_total_loudness(L_eq)
     pldb = 32.0 + 9.0*np.log2(total_loudness)
+
+    # Prints relevant results from the loudness analysis
     if print_results:
         directory = './PyLdB_Results'
         if not os.path.exists(directory):
