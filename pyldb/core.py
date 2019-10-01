@@ -185,17 +185,16 @@ def perceivedloudness(time, pressure,
     """
     # Initialize variables
     n_bins = len(BAND_CENTERS)
-    if pad_front != 0:
-        frontpad = len(pressure)*pad_front
-    if pad_rear != 0:
-        rearpad = len(pressure)*pad_rear
+    frontpad = len(pressure)*pad_front
+    rearpad = len(pressure)*pad_rear
 
     # Begin main PLdB calculation method
     if len_window != 0:
         pressure_window = _window(pressure, len_window)
-    if (pad_front and pad_rear) != 0:
-        time_pad, pressure_pad = _padding(time, pressure_window, frontpad,
-                                          rearpad)
+    else:
+        pressure_window = pressure
+    time_pad, pressure_pad = _padding(time, pressure_window, frontpad,
+                                      rearpad)
     freq, power = _power_spectrum(time_pad, pressure_pad)
     energy, loudness = _sound_pressure_levels(freq, power, n_bins)
     L_eq = _equivalent_loudness(loudness, n_bins)
