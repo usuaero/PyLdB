@@ -9,5 +9,5 @@ setup(name='pyldb',
       author='usuaero',
       author_email='doug.hunsaker@usu.edu',
       license='MIT',
-      py_module=['pyldb'],
+      packages=['pyldb'],
       zip_safe=False)
