@@ -97,11 +97,10 @@ import os
 
 class PyLdB:
     
-    def __init__(self, filename):
+    def __init__(self):
         self._initialize_table_data()
-        self._import_sig(filename)
-
-        
+        self.ref_pressure_psf = 2.900755e-9*144  # Reference pressure in psf (20 µPa)
+        self.ref_time_s = 0.07  # Human auditory response time time in seconds   
 
     def perceivedloudness(self, time, pressure,
                         pad_front=1, pad_rear=1,
@@ -263,28 +262,24 @@ class PyLdB:
         return time, pressure
 
 
-    def _window(dataset, len_window):
+    def window(self, len_window):
         win = np.hanning(len_window*2)
-        windowed_data = np.copy(dataset)
-        windowed_data[:len_window] *= win[:len_window]
-        windowed_data[-len_window:] *= win[len_window:]
-        return windowed_data
+        self.sig_pressure_psf[:len_window] *= win[:len_window]
+        self.sig_pressure_psf[-len_window:] *= win[len_window:]
 
 
-    def _padding(x_var, y_var, f_pad, r_pad):
-        pad_y = np.pad(y_var, (f_pad, r_pad), 'constant')
-        n_frontpad = f_pad*(x_var[1] - x_var[0])
-        n_rearpad = x_var[-1] + r_pad*(x_var[1] - x_var[0]) + n_frontpad
-        frontx = np.linspace(x_var[0], n_frontpad, num=f_pad, endpoint=True)
-        rearx = np.linspace(x_var[-1]+n_frontpad, n_rearpad, num=r_pad,
-                            endpoint=True)
-        padded_length = len(x_var) + len(frontx) + len(rearx)
-        pad_x = np.zeros(padded_length)
-        shifted_x = x_var[:] + n_frontpad
-        pad_x[:len(frontx)] = frontx
-        pad_x[len(frontx):len(frontx)+len(x_var)] = shifted_x
-        pad_x[len(frontx)+len(x_var):] = rearx
-        return pad_x, pad_y
+    def padding(self, n_pad_points):
+        padded_pressure = np.pad(self.sig_pressure_psf, n_pad_points, 'constant')
+        init_time_f = 0.0
+        final_time_f = n_pad_points*self.dt_ms
+        init_time_r = self.sig_time_ms[-1]
+        final_time_r = self.sig_time_ms[-1] + n_pad_points*(1.0 + self.dt_ms)
+        time_range_f = np.linspace(init_time_f, final_time_f, n_pad_points)
+        time_range_r = np.linspace(init_time_r, final_time_r, n_pad_points)
+        padded_time = np.concatenate((time_range_f, self.sig_time_ms + final_time_f,
+                                    time_range_r))
+        self.sig_pressure_psf = padded_pressure
+        self.sig_time_ms = padded_time
 
 
     def _power_spectrum(time, pressure):
@@ -395,15 +390,28 @@ class PyLdB:
         return total_loudness, sones
     
     def _initialize_table_data(self):
-        self.equiv_loudness_sones_data = np.genfromtxt('../tables/L_eq_v_sones.csv', delimiter=',', skip_header=1)
+        # Get the absolute path of the directory containing this script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        tables_dir = os.path.join(base_dir, '../tables')
+
+        # Use absolute paths to load the tables
+        self.equiv_loudness_sones_data = np.genfromtxt(
+            os.path.join(tables_dir, 'L_eq_v_sones.csv'), delimiter=',', skip_header=1
+        )
         self.equiv_loudness_table_indep = self.equiv_loudness_sones_data[:, 0]
         self.sones_equiv_loudness_table = self.equiv_loudness_sones_data[:, 1]
         self.num_equiv_loudness_vals = len(self.equiv_loudness_table_indep)
-        self.sones_sum_factor_data = np.genfromtxt('../tables/sones_v_sumf.csv', delimiter=',', skip_header=1)
+
+        self.sones_sum_factor_data = np.genfromtxt(
+            os.path.join(tables_dir, 'sones_v_sumf.csv'), delimiter=',', skip_header=1
+        )
         self.sones_table_indep = self.sones_sum_factor_data[:, 0]
         self.sum_factor_table = self.sones_sum_factor_data[:, 1]
         self.num_sum_factors = len(self.sones_table_indep)
-        self.freq_band_data = np.genfromtxt('../tables/freq_bands.csv', delimiter=',', skip_header=1)
+
+        self.freq_band_data = np.genfromtxt(
+            os.path.join(tables_dir, 'freq_bands.csv'), delimiter=',', skip_header=1
+        )
         self.freq_band_center = self.freq_band_data[:, 0]
         self.freq_band_lower_lim = self.freq_band_data[:, 1]
         self.freq_band_upper_lim = self.freq_band_data[:, 2]
@@ -412,5 +420,6 @@ class PyLdB:
     def _import_sig(self, filename, header_lines=0, delimiter=None):
         sig_data = np.genfromtxt(filename, skip_header=header_lines,
                                 delimiter=delimiter)
-        self.sig_time = sig_data[:, 0]
-        self.sig_pressure = sig_data[:, 1]
+        self.sig_time_ms = sig_data[:, 0]
+        self.sig_pressure_psf = sig_data[:, 1]
+        self.dt_ms = (self.sig_time_ms[1] - self.sig_time_ms[0])  # Time step in ms   
