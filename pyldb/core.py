@@ -224,44 +224,6 @@ class PyLdB:
                     np.array([BAND_CENTERS, sones]).T)
         return pldb
 
-
-    def import_sig(filename, header_lines=0, delimiter=None):
-        r"""Imports time and pressure data from a file provided by the user.
-
-        Any file type that is compatible with numpy's genfromtxt method can be used
-        with this function. The time data should be contained in the left-most
-        column of the file, and the pressure data should be contained in the right-
-        most column. Header lines should be skipped using the `header_lines`
-        parameter.
-
-        Parameters
-        ----------
-        filename : string
-            Contains the name of the file from which the time and pressure data
-            will be imported.
-        header_lines : int, optional
-            Specifies how many lines containing header information should be
-            skipped when reading the file data.
-
-        Returns
-        -------
-        time : array_like
-            Array containing the time data imported from the file.
-        pressure : array_like
-            Array containing the pressure data imported from the file.
-
-        Examples
-        --------
-        >>> import pyldb
-        >>> time, pressure = pyldb.import_sig("Testsig.sig", header_lines=3)
-        """
-        data = np.genfromtxt(filename, skip_header=header_lines,
-                            delimiter=delimiter)
-        time = data[:, 0]
-        pressure = data[:, 1]
-        return time, pressure
-
-
     def window(self, len_window):
         win = np.hanning(len_window*2)
         self.sig_pressure_psf[:len_window] *= win[:len_window]
@@ -271,23 +233,23 @@ class PyLdB:
     def padding(self, n_pad_points):
         padded_pressure = np.pad(self.sig_pressure_psf, n_pad_points, 'constant')
         init_time_f = 0.0
-        final_time_f = n_pad_points*self.dt_ms
-        init_time_r = self.sig_time_ms[-1]
-        final_time_r = self.sig_time_ms[-1] + n_pad_points*(1.0 + self.dt_ms)
-        time_range_f = np.linspace(init_time_f, final_time_f, n_pad_points)
-        time_range_r = np.linspace(init_time_r, final_time_r, n_pad_points)
-        padded_time = np.concatenate((time_range_f, self.sig_time_ms + final_time_f,
+        final_time_f = (n_pad_points - 1)*self.dt_ms
+        init_time_r = final_time_f + self.sig_time_ms[-1] + 2.0*self.dt_ms
+        final_time_r = init_time_r + (n_pad_points - 1)*self.dt_ms
+        time_range_f = np.arange(init_time_f, final_time_f + self.dt_ms, self.dt_ms)
+        time_range_r = np.arange(init_time_r, final_time_r + self.dt_ms, self.dt_ms)
+        padded_time = np.concatenate((time_range_f, self.sig_time_ms + final_time_f + self.dt_ms,
                                     time_range_r))
         self.sig_pressure_psf = padded_pressure
         self.sig_time_ms = padded_time
+        self.n_data_points = len(self.sig_pressure_psf)
 
 
-    def _power_spectrum(time, pressure):
+    def _power_spectrum(self, time, pressure):
         # The units for time are in milliseconds, and the units for pressure
         # are lbs/ft^2 (psf).
-        N = len(pressure)
-        dt = ((time[-1]-time[0])/N)*(10**-3)  # ms -> s
-        FFT = np.fft.fft(pressure)
+        dt_s = self.dt_ms*(10**-3)  # ms -> s
+        FFT = np.fft.hfft(self.sig_pressure_psf)
         freq = np.fft.fftfreq(N)/dt
         Power = (np.abs(FFT)**2)*(dt**2)
         freqOne, PowerOne = _power_interp(freq, Power, N)
@@ -422,4 +384,8 @@ class PyLdB:
                                 delimiter=delimiter)
         self.sig_time_ms = sig_data[:, 0]
         self.sig_pressure_psf = sig_data[:, 1]
-        self.dt_ms = (self.sig_time_ms[1] - self.sig_time_ms[0])  # Time step in ms   
+        self.dt_ms = (self.sig_time_ms[1] - self.sig_time_ms[0])  # Time step in ms
+        self.n_data_points = len(self.sig_pressure_psf)
+
+if __name__ == "__main__":
+    pldb = PyLdB()
