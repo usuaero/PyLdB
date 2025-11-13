@@ -100,7 +100,8 @@ class PyLdB:
     def __init__(self):
         self._initialize_table_data()
         self.ref_pressure_psf = 2.900755e-9*144  # Reference pressure in psf (20 µPa)
-        self.ref_time_s = 0.07  # Human auditory response time time in seconds   
+        self.ref_time_s = 0.07  # Human auditory response time time in seconds
+        self.windowed_signal = False
 
     def perceivedloudness(self, time, pressure,
                         pad_front=1, pad_rear=1,
@@ -223,12 +224,50 @@ class PyLdB:
             np.savetxt(directory + '/sones',
                     np.array([BAND_CENTERS, sones]).T)
         return pldb
+    
+    def _import_sig(self, filename, header_lines=0, delimiter=None):
+        sig_data = np.genfromtxt(filename, skip_header=header_lines,
+                                delimiter=delimiter)
+        self.sig_time_ms = sig_data[:, 0]
+        self.sig_pressure_psf = sig_data[:, 1]
+        self.dt_ms = (self.sig_time_ms[1] - self.sig_time_ms[0])  # Time step in ms
+        self.dt_s = self.dt_ms*(10**-3)  # Time step in s
+        self.freq_s = 1.0/self.dt_s  # Sampling frequency in Hz
+        self.n_data_points = len(self.sig_pressure_psf)
+    
+    def _initialize_table_data(self):
+        # Get the absolute path of the directory containing this script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        tables_dir = os.path.join(base_dir, '../tables')
+        L_eq_v_sones_fname = os.path.join(tables_dir, 'L_eq_v_sones.csv')
+        sones_sum_factor_fname = os.path.join(tables_dir, 'sones_v_sumf.csv')
+        freq_bands_fname = os.path.join(tables_dir, 'freq_bands.csv')
+
+        # Use absolute paths to load the tables
+        self.equiv_loudness_sones_data = np.genfromtxt(L_eq_v_sones_fname, delimiter=',', skip_header=1)
+        self.equiv_loudness_table_indep = self.equiv_loudness_sones_data[:, 0]
+        self.sones_equiv_loudness_table = self.equiv_loudness_sones_data[:, 1]
+        self.num_equiv_loudness_vals = len(self.equiv_loudness_table_indep)
+
+        self.sones_sum_factor_data = np.genfromtxt(sones_sum_factor_fname, delimiter=',', skip_header=1)
+        self.sones_table_indep = self.sones_sum_factor_data[:, 0]
+        self.sum_factor_table = self.sones_sum_factor_data[:, 1]
+        self.num_sum_factors = len(self.sones_table_indep)
+
+        self.freq_band_data = np.genfromtxt(freq_bands_fname, delimiter=',', skip_header=1)
+        self.freq_band_center = self.freq_band_data[:, 0]
+        self.freq_band_lower_lim = self.freq_band_data[:, 1]
+        self.freq_band_upper_lim = self.freq_band_data[:, 2]
+        self.num_freq_bands = len(self.freq_band_center)
 
     def window(self, len_window):
         win = np.hanning(len_window*2)
         self.sig_pressure_psf[:len_window] *= win[:len_window]
         self.sig_pressure_psf[-len_window:] *= win[len_window:]
-
+        self.windowed_signal = True
+        self.S_1 = np.sum(win)
+        self.S_1sq = self.S_1**2
+        self.S_2 = np.sum(np.square(win))
 
     def padding(self, n_pad_points):
         padded_pressure = np.pad(self.sig_pressure_psf, n_pad_points, 'constant')
@@ -244,15 +283,17 @@ class PyLdB:
         self.sig_time_ms = padded_time
         self.n_data_points = len(self.sig_pressure_psf)
 
-
-    def _power_spectrum(self, time, pressure):
+    def _power_spectrum(self):
         # The units for time are in milliseconds, and the units for pressure
         # are lbs/ft^2 (psf).
-        dt_s = self.dt_ms*(10**-3)  # ms -> s
-        FFT = np.fft.hfft(self.sig_pressure_psf)
-        freq = np.fft.fftfreq(N)/dt
+        FFT = np.fft.hfft(self.sig_pressure_psf) # Unscaled FFT (psf, len=N)
+        pos_FFT = FFT[0:self.n_data_points//2 + 1]  # One-sided FFT (psf, len=N/2+1)
+        freq = np.fft.rfftfreq(self.n_data_points, d=self.dt_s) # Frequency bucket centers in Hz (len=N/2+1)
+        if self.windowed_signal:
+            power_spec = np.square(np.abs(FFT))/self.S_1sq
+        pds = (np.abs(FFT)**2)/self.n_data_points  # Power spectral density in (psf)^2/Hz
         Power = (np.abs(FFT)**2)*(dt**2)
-        freqOne, PowerOne = _power_interp(freq, Power, N)
+        freqOne, PowerOne = self._power_interp(freq, Power, N)
         return freqOne, PowerOne
 
 
@@ -350,42 +391,6 @@ class PyLdB:
                             left=0.0, right=SUMMATION_FACTORS[-1])
         total_loudness = sones.max() + sum_f_max*(sum(sones) - sones.max())
         return total_loudness, sones
-    
-    def _initialize_table_data(self):
-        # Get the absolute path of the directory containing this script
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        tables_dir = os.path.join(base_dir, '../tables')
-
-        # Use absolute paths to load the tables
-        self.equiv_loudness_sones_data = np.genfromtxt(
-            os.path.join(tables_dir, 'L_eq_v_sones.csv'), delimiter=',', skip_header=1
-        )
-        self.equiv_loudness_table_indep = self.equiv_loudness_sones_data[:, 0]
-        self.sones_equiv_loudness_table = self.equiv_loudness_sones_data[:, 1]
-        self.num_equiv_loudness_vals = len(self.equiv_loudness_table_indep)
-
-        self.sones_sum_factor_data = np.genfromtxt(
-            os.path.join(tables_dir, 'sones_v_sumf.csv'), delimiter=',', skip_header=1
-        )
-        self.sones_table_indep = self.sones_sum_factor_data[:, 0]
-        self.sum_factor_table = self.sones_sum_factor_data[:, 1]
-        self.num_sum_factors = len(self.sones_table_indep)
-
-        self.freq_band_data = np.genfromtxt(
-            os.path.join(tables_dir, 'freq_bands.csv'), delimiter=',', skip_header=1
-        )
-        self.freq_band_center = self.freq_band_data[:, 0]
-        self.freq_band_lower_lim = self.freq_band_data[:, 1]
-        self.freq_band_upper_lim = self.freq_band_data[:, 2]
-        self.num_freq_bands = len(self.freq_band_center)
-    
-    def _import_sig(self, filename, header_lines=0, delimiter=None):
-        sig_data = np.genfromtxt(filename, skip_header=header_lines,
-                                delimiter=delimiter)
-        self.sig_time_ms = sig_data[:, 0]
-        self.sig_pressure_psf = sig_data[:, 1]
-        self.dt_ms = (self.sig_time_ms[1] - self.sig_time_ms[0])  # Time step in ms
-        self.n_data_points = len(self.sig_pressure_psf)
 
 if __name__ == "__main__":
     pldb = PyLdB()
