@@ -5,7 +5,7 @@ pyldb unit testing
 """
 
 import pytest
-from pyldb.core import PyLdB
+from pyldb.core import PyLdB, SensitivityResults
 import numpy as np
 import os.path
 
@@ -66,6 +66,70 @@ def test_calculate_populates_loudness_results():
     assert np.isfinite(loudness.b_weighted_loudness)
     assert np.isfinite(loudness.c_weighted_loudness)
     assert np.isfinite(loudness.d_weighted_loudness)
+
+def test_calculate_uses_reusable_preprocessing_settings():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3,
+                          pad_front=6, pad_rear=6, len_window=800)
+
+    loudness = pldb_instance.calculate(ctl=75.0)
+
+    assert np.allclose(loudness.pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
+
+def test_calculate_updates_reusable_preprocessing_settings():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3)
+
+    explicit_loudness = pldb_instance.calculate(pad_front=6, pad_rear=6,
+                                                len_window=800)
+    reused_loudness = pldb_instance.calculate()
+
+    assert np.allclose(reused_loudness.pldb, explicit_loudness.pldb, rtol=0.0, atol=10e-12)
+    assert pldb_instance.pad_front == 6
+    assert pldb_instance.pad_rear == 6
+    assert pldb_instance.len_window == 800
+
+def test_wavelet_band_energy_conservation():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3,
+                          pad_front=1, pad_rear=1, len_window=800)
+
+    sensitivity = pldb_instance.sensitivity(top_n=5)
+    n_bands = len(sensitivity.band_centers_hz)
+
+    for j in range(n_bands):
+        recovered = np.trapz(sensitivity.local_energy[j, :], sensitivity.time_s)
+        expected = sensitivity.fft_band_energy[j]
+        assert np.isclose(recovered, expected, rtol=1e-3)
+
+def test_sensitivity_results_shape_and_ranking():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3,
+                          pad_front=1, pad_rear=1, len_window=800)
+
+    sensitivity = pldb_instance.sensitivity(top_n=10)
+
+    assert isinstance(sensitivity, SensitivityResults)
+    assert np.allclose(sensitivity.global_pldb, pldb_instance.perceived_loudness_pldb)
+    assert sensitivity.local_energy.shape == (len(sensitivity.band_centers_hz), len(sensitivity.time_s))
+    assert sensitivity.sone_map.shape == sensitivity.local_energy.shape
+    assert sensitivity.local_pldb.shape == sensitivity.local_energy.shape
+    assert len(sensitivity.top_buckets) <= 10
+
+    scores = np.array([bucket["score"] for bucket in sensitivity.top_buckets])
+    assert np.all(scores[:-1] >= scores[1:])
+
+def test_configure_changes_reused_preprocessing_settings():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3,
+                          pad_front=1, pad_rear=1, len_window=800)
+
+    first = pldb_instance.calculate()
+    pldb_instance.configure(pad_front=6, pad_rear=6, len_window=800)
+    second = pldb_instance.calculate()
+
+    assert not np.allclose(first.pldb, second.pldb, rtol=0.0, atol=10e-12)
+    assert np.allclose(second.pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
 
 def test_padding_time_shift():
     # Initialize PyLdB instance and set up test data

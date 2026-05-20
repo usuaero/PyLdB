@@ -98,6 +98,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
+from scipy import signal
 
 from .acoustics import alphabet_weighted_levels, dnl, equivalent, fidell_ctl
 
@@ -156,6 +157,20 @@ class LoudnessResults:
         return self.alphabet_weighted_loudnesses["d"]
 
 
+@dataclass
+class SensitivityResults:
+    """Container for calibrated wavelet sensitivity diagnostics."""
+
+    global_pldb: float
+    time_s: np.ndarray
+    band_centers_hz: np.ndarray
+    fft_band_energy: np.ndarray
+    local_energy: np.ndarray
+    sone_map: np.ndarray
+    local_pldb: np.ndarray
+    top_buckets: Tuple[Dict[str, float], ...]
+
+
 class PyLdB:
     """Object-oriented perceived loudness calculator.
 
@@ -207,10 +222,17 @@ class PyLdB:
         pressure: Optional[np.ndarray] = None,
         header_lines: int = 0,
         delimiter: Optional[str] = None,
+        pad_front: int = 1,
+        pad_rear: int = 1,
+        len_window: int = 800,
     ) -> None:
         self._initialize_table_data()
         self.clear_signature()
         self.clear_results()
+        self.pad_front = 1
+        self.pad_rear = 1
+        self.len_window = 800
+        self.configure(pad_front=pad_front, pad_rear=pad_rear, len_window=len_window)
 
         if signature_file is not None:
             self.import_signature(signature_file, header_lines=header_lines, delimiter=delimiter)
@@ -257,6 +279,30 @@ class PyLdB:
         self.total_loudness_sones: Optional[float] = None
         self.perceived_loudness_pldb: Optional[float] = None
         self.loudness: Optional[LoudnessResults] = None
+        self.sensitivity_results: Optional[SensitivityResults] = None
+
+    def configure(
+        self,
+        *,
+        pad_front: Optional[int] = None,
+        pad_rear: Optional[int] = None,
+        len_window: Optional[int] = None,
+    ) -> "PyLdB":
+        """Update reusable preprocessing settings for future calculations."""
+
+        if pad_front is not None:
+            if pad_front < 0:
+                raise ValueError("Front padding multiplier must be non-negative.")
+            self.pad_front = int(pad_front)
+        if pad_rear is not None:
+            if pad_rear < 0:
+                raise ValueError("Rear padding multiplier must be non-negative.")
+            self.pad_rear = int(pad_rear)
+        if len_window is not None:
+            if len_window < 0:
+                raise ValueError("Window length must be non-negative.")
+            self.len_window = int(len_window)
+        return self
 
     def import_signature(
         self,
@@ -365,9 +411,9 @@ class PyLdB:
         signature_file: Optional[str | Path] = None,
         header_lines: int = 0,
         delimiter: Optional[str] = None,
-        pad_front: int = 1,
-        pad_rear: int = 1,
-        len_window: int = 800,
+        pad_front: Optional[int] = None,
+        pad_rear: Optional[int] = None,
+        len_window: Optional[int] = None,
         print_results: bool = False,
         results_dir: str | Path = "PyLdB_Results",
     ) -> float:
@@ -442,33 +488,19 @@ class PyLdB:
         >>> pldb = calculator.perceived_loudness(pad_front=6, pad_rear=6)
         """
 
-        if signature_file is not None:
-            self.import_signature(signature_file, header_lines=header_lines, delimiter=delimiter)
-        elif time is not None or pressure is not None:
-            if time is None or pressure is None:
-                raise ValueError("Both time and pressure must be supplied together.")
-            self.set_signature(time, pressure)
-        else:
-            self._require_signature()
-
-        self._reset_working_signature()
-        if pad_front < 0 or pad_rear < 0:
-            raise ValueError("Padding multipliers must be non-negative.")
-        if len_window < 0:
-            raise ValueError("Window length must be non-negative.")
-
-        if len_window:
-            self.window(len_window)
-        self.padding(n_front_points=self.n_data_points * pad_front, n_rear_points=self.n_data_points * pad_rear)
-
-        self.frequency_hz, self.power_spectrum = self._power_spectrum()
-        self.band_energy, self.sound_pressure_level = self._sound_pressure_levels(
-            self.frequency_hz,
-            self.power_spectrum,
+        self._load_or_require_signature(
+            time=time,
+            pressure=pressure,
+            signature_file=signature_file,
+            header_lines=header_lines,
+            delimiter=delimiter,
         )
-        self.equivalent_loudness = self._equivalent_loudness(self.sound_pressure_level)
-        self.total_loudness_sones, self.sones = self._calc_total_loudness(self.equivalent_loudness)
-        self.perceived_loudness_pldb = float(32.0 + 9.0 * np.log2(self.total_loudness_sones))
+        self._prepare_working_signature(
+            pad_front=pad_front,
+            pad_rear=pad_rear,
+            len_window=len_window,
+        )
+        self._run_mark_vii()
 
         if print_results:
             self.write_results(results_dir)
@@ -488,9 +520,9 @@ class PyLdB:
         signature_file: Optional[str | Path] = None,
         header_lines: int = 0,
         delimiter: Optional[str] = None,
-        pad_front: int = 1,
-        pad_rear: int = 1,
-        len_window: int = 800,
+        pad_front: Optional[int] = None,
+        pad_rear: Optional[int] = None,
+        len_window: Optional[int] = None,
         ctl: Optional[float] = 75.0,
         a_star: Optional[float] = None,
         growth: float = 0.3,
@@ -550,32 +582,61 @@ class PyLdB:
             results_dir=results_dir,
         )
 
-        if day_loudness is None:
-            day_loudness = pldb
-        if night_loudness is None:
-            night_loudness = pldb
-        if equivalent_loudnesses is None:
-            equivalent_loudnesses = pldb
-
-        alphabet = alphabet_weighted_levels(self.freq_band_center, self.sound_pressure_level)
-        if ctl is None and a_star is not None:
-            community_tolerance_level = float(-10.0 * np.log10(-np.log(0.5)) / growth + a_star / growth)
-        else:
-            community_tolerance_level = ctl
-
-        ctl_response = float(fidell_ctl(pldb, growth=growth, ctl=ctl, a_star=a_star))
-        dnl_value = dnl(day_loudness, night_loudness)
-        equivalent_value = equivalent(equivalent_loudnesses)
-
-        self.loudness = LoudnessResults(
+        self.loudness = self._build_loudness_results(
             pldb=pldb,
-            ctl=ctl_response,
-            community_tolerance_level=community_tolerance_level,
-            dnl=dnl_value,
-            equivalent_loudness=equivalent_value,
-            alphabet_weighted_loudnesses=alphabet,
+            ctl=ctl,
+            a_star=a_star,
+            growth=growth,
+            day_loudness=pldb if day_loudness is None else day_loudness,
+            night_loudness=pldb if night_loudness is None else night_loudness,
+            equivalent_loudnesses=pldb if equivalent_loudnesses is None else equivalent_loudnesses,
         )
         return self.loudness
+
+    def sensitivity(
+        self,
+        *,
+        top_n: int = 20,
+        pad_front: Optional[int] = None,
+        pad_rear: Optional[int] = None,
+        len_window: Optional[int] = None,
+    ) -> SensitivityResults:
+        """Calculate calibrated wavelet sensitivity diagnostics.
+
+        The standard FFT Mark VII calculation is performed first. Morlet CWT
+        energy is then calibrated band-by-band so each localized band energy
+        time history integrates to the corresponding FFT band energy.
+        """
+
+        if top_n < 0:
+            raise ValueError("top_n must be non-negative.")
+
+        self._load_or_require_signature()
+        self._prepare_working_signature(
+            pad_front=pad_front,
+            pad_rear=pad_rear,
+            len_window=len_window,
+        )
+        global_pldb = self._run_mark_vii()
+        time_s = self.sig_time_ms * 1.0e-3
+        raw_energy = self._wavelet_local_energy()
+        local_energy = self._calibrate_local_energy(raw_energy, time_s, self.band_energy)
+        local_spl = self._sound_pressure_level_from_energy(local_energy)
+        sone_map = self._sones_from_equivalent_loudness(self._equivalent_loudness(local_spl))
+        local_pldb = self._pldb_from_sones(sone_map)
+        top_buckets = self._top_sensitivity_buckets(time_s, local_energy, sone_map, local_pldb, top_n)
+
+        self.sensitivity_results = SensitivityResults(
+            global_pldb=global_pldb,
+            time_s=time_s.copy(),
+            band_centers_hz=self.freq_band_center.copy(),
+            fft_band_energy=self.band_energy.copy(),
+            local_energy=local_energy,
+            sone_map=sone_map,
+            local_pldb=local_pldb,
+            top_buckets=top_buckets,
+        )
+        return self.sensitivity_results
 
     def window(self, len_window: int) -> "PyLdB":
         """Apply a symmetric Hanning window to the active pressure signature.
@@ -765,31 +826,31 @@ class PyLdB:
                 energy[j] = np.trapz(power[section], x=freq[section])
 
         energy /= self.ref_time_s
-        with np.errstate(divide="ignore", invalid="ignore"):
-            loudness = 10.0 * np.log10(energy / (self.ref_pressure_psf**2)) - 3.0
-        return energy, loudness
+        return energy, self._sound_pressure_level_from_energy(energy)
 
     def _equivalent_loudness(self, loudness: np.ndarray) -> np.ndarray:
         """Transform band sound pressure levels to equivalent loudness values."""
 
-        L_eq = np.zeros(self.num_freq_bands)
+        loudness = np.asarray(loudness, dtype=float)
+        L_eq = np.zeros_like(loudness)
 
         for i in range(self.num_freq_bands):
+            band_loudness = loudness[i]
             if i > 39:
-                L_eq[i] = loudness[i] + 4.0 * (39.0 - i)
+                L_eq[i] = band_loudness + 4.0 * (39.0 - i)
             elif 35 <= i <= 39:
-                L_eq[i] = loudness[i]
+                L_eq[i] = band_loudness
             elif 32 <= i <= 34:
-                L_eq[i] = loudness[i] - 2.0 * (35.0 - i)
+                L_eq[i] = band_loudness - 2.0 * (35.0 - i)
             elif 26 < i <= 31:
-                L_eq[i] = loudness[i] - 8.0
+                L_eq[i] = band_loudness - 8.0
             elif 20 <= i <= 26:
                 lower_limit = 76.0 + 1.5 * (26 - i)
                 upper_limit = 121.0 + 1.5 * (26 - i)
                 x_value = 1.5 * (26 - i)
-                L_eq[i] = self._loud_limits_400(self.freq_band_center[i], lower_limit, upper_limit, loudness[i], x_value)
+                L_eq[i] = self._loud_limits_400(self.freq_band_center[i], lower_limit, upper_limit, band_loudness, x_value)
             else:
-                numerator = (160.0 - loudness[i]) * np.log10(80.0)
+                numerator = (160.0 - band_loudness) * np.log10(80.0)
                 denominator = np.log10(self.freq_band_center[i])
                 L_eq_B = 160.0 - numerator / denominator
                 L_eq[i] = self._loud_limits_400(80.0, 86.5, 131.5, L_eq_B, 10.5)
@@ -801,29 +862,25 @@ class PyLdB:
         f_central: float,
         lower_limit: float,
         upper_limit: float,
-        loudness: float,
+        loudness: np.ndarray | float,
         x_value: float,
-    ) -> float:
+    ) -> np.ndarray | float:
         """Apply the 400 Hz equivalent-loudness limiting transformation."""
 
-        if loudness <= lower_limit:
-            equivalent = 115.0 - ((115.0 - loudness) * np.log10(400.0)) / np.log10(f_central)
-            return equivalent - 8.0
-        if loudness <= upper_limit:
-            return loudness - x_value - 8.0
-        equivalent = 160.0 - ((160.0 - loudness) * np.log10(400.0)) / np.log10(f_central)
+        lower_equivalent = 115.0 - ((115.0 - loudness) * np.log10(400.0)) / np.log10(f_central)
+        middle_equivalent = loudness - x_value
+        upper_equivalent = 160.0 - ((160.0 - loudness) * np.log10(400.0)) / np.log10(f_central)
+        equivalent = np.where(
+            loudness <= lower_limit,
+            lower_equivalent,
+            np.where(loudness <= upper_limit, middle_equivalent, upper_equivalent),
+        )
         return equivalent - 8.0
 
     def _calc_total_loudness(self, L_eq: np.ndarray) -> Tuple[float, np.ndarray]:
         """Calculate total loudness in sones from equivalent loudness values."""
 
-        sones = np.interp(
-            L_eq,
-            self.equiv_loudness_table_indep,
-            self.sones_equiv_loudness_table,
-            left=0.0,
-            right=self.sones_equiv_loudness_table[-1],
-        )
+        sones = self._sones_from_equivalent_loudness(L_eq)
         max_sones = float(np.max(sones))
         sum_factor = float(
             np.interp(
@@ -836,6 +893,177 @@ class PyLdB:
         )
         total_loudness = max_sones + sum_factor * (float(np.sum(sones)) - max_sones)
         return total_loudness, sones
+
+    def _load_or_require_signature(
+        self,
+        time: Optional[np.ndarray] = None,
+        pressure: Optional[np.ndarray] = None,
+        *,
+        signature_file: Optional[str | Path] = None,
+        header_lines: int = 0,
+        delimiter: Optional[str] = None,
+    ) -> None:
+        if signature_file is not None:
+            self.import_signature(signature_file, header_lines=header_lines, delimiter=delimiter)
+        elif time is not None or pressure is not None:
+            if time is None or pressure is None:
+                raise ValueError("Both time and pressure must be supplied together.")
+            self.set_signature(time, pressure)
+        else:
+            self._require_signature()
+
+    def _prepare_working_signature(
+        self,
+        *,
+        pad_front: Optional[int],
+        pad_rear: Optional[int],
+        len_window: Optional[int],
+    ) -> None:
+        pad_front, pad_rear, len_window = self._resolve_preprocessing_settings(
+            pad_front=pad_front,
+            pad_rear=pad_rear,
+            len_window=len_window,
+        )
+        self._reset_working_signature()
+        if len_window:
+            self.window(len_window)
+        self.padding(n_front_points=self.n_data_points * pad_front, n_rear_points=self.n_data_points * pad_rear)
+
+    def _run_mark_vii(self) -> float:
+        self.frequency_hz, self.power_spectrum = self._power_spectrum()
+        self.band_energy, self.sound_pressure_level = self._sound_pressure_levels(
+            self.frequency_hz,
+            self.power_spectrum,
+        )
+        self.equivalent_loudness = self._equivalent_loudness(self.sound_pressure_level)
+        self.total_loudness_sones, self.sones = self._calc_total_loudness(self.equivalent_loudness)
+        self.perceived_loudness_pldb = float(32.0 + 9.0 * np.log2(self.total_loudness_sones))
+        return self.perceived_loudness_pldb
+
+    def _build_loudness_results(
+        self,
+        *,
+        pldb: float,
+        ctl: Optional[float],
+        a_star: Optional[float],
+        growth: float,
+        day_loudness,
+        night_loudness,
+        equivalent_loudnesses,
+    ) -> LoudnessResults:
+        if ctl is None and a_star is not None:
+            community_tolerance_level = float(-10.0 * np.log10(-np.log(0.5)) / growth + a_star / growth)
+        else:
+            community_tolerance_level = ctl
+
+        return LoudnessResults(
+            pldb=pldb,
+            ctl=float(fidell_ctl(pldb, growth=growth, ctl=ctl, a_star=a_star)),
+            community_tolerance_level=community_tolerance_level,
+            dnl=dnl(day_loudness, night_loudness),
+            equivalent_loudness=equivalent(equivalent_loudnesses),
+            alphabet_weighted_loudnesses=alphabet_weighted_levels(self.freq_band_center, self.sound_pressure_level),
+        )
+
+    def _sound_pressure_level_from_energy(self, energy: np.ndarray) -> np.ndarray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return 10.0 * np.log10(energy / (self.ref_pressure_psf**2)) - 3.0
+
+    def _sones_from_equivalent_loudness(self, equivalent_loudness: np.ndarray) -> np.ndarray:
+        return np.interp(
+            equivalent_loudness,
+            self.equiv_loudness_table_indep,
+            self.sones_equiv_loudness_table,
+            left=0.0,
+            right=self.sones_equiv_loudness_table[-1],
+        )
+
+    @staticmethod
+    def _pldb_from_sones(sones: np.ndarray) -> np.ndarray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pldb = 32.0 + 9.0 * np.log2(sones)
+        return np.where(sones > 0.0, pldb, 0.0)
+
+    @staticmethod
+    def _calibrate_local_energy(
+        raw_energy: np.ndarray,
+        time_s: np.ndarray,
+        expected_energy: np.ndarray,
+    ) -> np.ndarray:
+        local_energy = np.zeros_like(raw_energy)
+        recovered_energy = np.trapz(raw_energy, x=time_s, axis=1)
+        valid = (
+            (expected_energy > 0.0)
+            & np.isfinite(expected_energy)
+            & (recovered_energy > 0.0)
+            & np.isfinite(recovered_energy)
+        )
+        local_energy[valid] = raw_energy[valid] * (expected_energy[valid] / recovered_energy[valid])[:, np.newaxis]
+        return local_energy
+
+    def _resolve_preprocessing_settings(
+        self,
+        *,
+        pad_front: Optional[int],
+        pad_rear: Optional[int],
+        len_window: Optional[int],
+    ) -> Tuple[int, int, int]:
+        if pad_front is not None or pad_rear is not None or len_window is not None:
+            self.configure(pad_front=pad_front, pad_rear=pad_rear, len_window=len_window)
+        return self.pad_front, self.pad_rear, self.len_window
+
+    def _wavelet_local_energy(self, morlet_w: float = 6.0) -> np.ndarray:
+        """Return uncalibrated Morlet CWT local energy by Mark VII band."""
+
+        self._require_signature()
+        if self.dt_s is None:
+            raise RuntimeError("Signal time step is not available.")
+
+        sampling_frequency_hz = 1.0 / self.dt_s
+        widths = morlet_w * sampling_frequency_hz / (2.0 * np.pi * self.freq_band_center)
+        coefficients = signal.cwt(
+            self.sig_pressure_psf,
+            lambda points, width: signal.morlet2(points, width, w=morlet_w),
+            widths,
+        )
+        return np.abs(coefficients) ** 2
+
+    def _top_sensitivity_buckets(
+        self,
+        time_s: np.ndarray,
+        local_energy: np.ndarray,
+        sone_map: np.ndarray,
+        local_pldb: np.ndarray,
+        top_n: int,
+    ) -> Tuple[Dict[str, float], ...]:
+        if top_n == 0:
+            return tuple()
+
+        scores = np.nan_to_num(sone_map, nan=0.0, posinf=0.0, neginf=0.0)
+        flat_order = np.argsort(scores, axis=None)[::-1]
+        buckets = []
+
+        for flat_index in flat_order:
+            if len(buckets) >= top_n:
+                break
+            band_index, time_index = np.unravel_index(flat_index, scores.shape)
+            score = float(scores[band_index, time_index])
+            if score <= 0.0:
+                break
+            buckets.append(
+                {
+                    "band_index": int(band_index),
+                    "time_index": int(time_index),
+                    "band_center_hz": float(self.freq_band_center[band_index]),
+                    "time_s": float(time_s[time_index]),
+                    "local_energy": float(local_energy[band_index, time_index]),
+                    "local_sones": score,
+                    "local_pldb": float(local_pldb[band_index, time_index]),
+                    "score": score,
+                }
+            )
+
+        return tuple(buckets)
 
     def _require_signature(self) -> None:
         if self.sig_time_ms is None or self.sig_pressure_psf is None:
@@ -912,4 +1140,4 @@ def perceivedloudness(
     )
 
 
-__all__ = ["LoudnessResults", "PyLdB", "import_sig", "perceivedloudness"]
+__all__ = ["LoudnessResults", "SensitivityResults", "PyLdB", "import_sig", "perceivedloudness"]
