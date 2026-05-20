@@ -37,6 +37,15 @@ def test_import_sig():
     assert np.allclose(pldb_instance.sig_time_ms[:5], time_test, rtol=0.0, atol=10e-12)
     assert np.allclose(pldb_instance.sig_pressure_psf[:5], pressure_test, rtol=0.0, atol=10e-12)
 
+def test_panair_pldb_matches_origin_master():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3)
+
+    pldb = pldb_instance.perceived_loudness(pad_front=6, pad_rear=6,
+                                            len_window=800)
+
+    assert np.allclose(pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
+
 def test_padding_time_shift():
     # Initialize PyLdB instance and set up test data
     instance = PyLdB()
