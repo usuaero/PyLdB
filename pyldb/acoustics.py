@@ -1,4 +1,18 @@
-"""Acoustic post-processing utilities."""
+"""Acoustic post-processing utilities.
+
+This module contains helper methods to process calculated loudness levels into
+community response, day-night average level, energy-equivalent loudness, and
+standard alphabet-weighted overall levels.
+
+References
+----------
+Fidell, S., et al., "A first-principles model for estimating the prevalence of
+annoyance with aircraft noise exposure," The Journal of the Acoustical Society
+of America, Vol. 130, 791, 2011.
+
+Fidell, S., et al., "Community Response to High-Energy Impulsive Sounds: An
+Assessment of the Field Since 1981," National Research Council, 1996.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +20,31 @@ import numpy as np
 
 
 def fidell_ctl(noise, growth=0.3, ctl=None, a_star=None):
-    """Calculate Fidell CTL high-annoyance response probability."""
+    """Calculate Fidell CTL high-annoyance response probability.
+
+    This function evaluates the Fidell community response model for a noise
+    level or array of noise levels. A Community Tolerance Level (CTL) can be
+    supplied directly, or it can be derived from ``a_star`` and ``growth``.
+
+    Parameters
+    ----------
+    noise : float or array_like
+        Noise level or levels, in decibels.
+    growth : float, optional
+        Growth rate for the response curve. A value of 0.3 is commonly used for
+        subsonic aircraft noise, while larger values may be used for other
+        contexts.
+    ctl : float, optional
+        Community Tolerance Level.
+    a_star : float, optional
+        Fidell model intercept. Required when ``ctl`` is not supplied.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        High-annoyance response probability for the supplied noise level or
+        levels.
+    """
 
     if ctl is None and a_star is None:
         raise ValueError("Either ctl or a_star must be supplied.")
@@ -30,7 +68,26 @@ def fidell_CTL(noise, growth=0.3, CTL=None, A_star=None):
 
 
 def dnl(day_loudness, night_loudness):
-    """Calculate day-night average level from 15 day and 9 night hourly values."""
+    """Calculate day-night average level (DNL).
+
+    DNL is calculated from 15 daytime hourly levels and 9 nighttime hourly
+    levels. Nighttime levels receive the standard 10 dB penalty before the
+    24-hour energy average is calculated.
+
+    Parameters
+    ----------
+    day_loudness : float or array_like
+        Daytime hourly equivalent loudness values. A scalar is repeated for all
+        15 daytime hours; an array must contain 15 values.
+    night_loudness : float or array_like
+        Nighttime hourly equivalent loudness values. A scalar is repeated for
+        all 9 nighttime hours; an array must contain 9 values.
+
+    Returns
+    -------
+    float
+        Day-night average level.
+    """
 
     day = _as_hour_array(day_loudness, 15, "day_loudness")
     night = _as_hour_array(night_loudness, 9, "night_loudness")
@@ -47,7 +104,24 @@ def DNL(Lh_day, Lh_night):
 
 
 def equivalent(loudnesses, sampling=None):
-    """Calculate equivalent level for a scalar or sequence of levels."""
+    """Calculate energy-equivalent loudness.
+
+    Equivalent loudness is calculated by converting each level to energy,
+    averaging those energies, and converting the result back to decibels. If a
+    scalar loudness is supplied, ``sampling`` may be used to repeat that value.
+
+    Parameters
+    ----------
+    loudnesses : float or array_like
+        Loudness value or values to average.
+    sampling : int, optional
+        Number of repeated samples to use when ``loudnesses`` is scalar.
+
+    Returns
+    -------
+    float
+        Energy-equivalent loudness level.
+    """
 
     values = np.asarray(loudnesses, dtype=float)
     if values.ndim == 0:
@@ -61,7 +135,21 @@ def equivalent(loudnesses, sampling=None):
 
 
 def alphabet_weighted_levels(frequencies_hz, levels_db):
-    """Calculate overall A-, B-, C-, and D-weighted levels from band levels."""
+    """Calculate overall A-, B-, C-, and D-weighted levels.
+
+    Parameters
+    ----------
+    frequencies_hz : array_like
+        Frequency band centers in hertz.
+    levels_db : array_like
+        Unweighted band sound pressure levels in decibels.
+
+    Returns
+    -------
+    dict
+        Overall weighted levels keyed as ``"a"``, ``"b"``, ``"c"``, and
+        ``"d"``.
+    """
 
     frequencies = np.asarray(frequencies_hz, dtype=float)
     levels = np.asarray(levels_db, dtype=float)
@@ -77,7 +165,18 @@ def alphabet_weighted_levels(frequencies_hz, levels_db):
 
 
 def a_weighting(frequencies_hz):
-    """Return A-weighting adjustments in dB."""
+    """Return A-weighting adjustments in dB.
+
+    Parameters
+    ----------
+    frequencies_hz : array_like
+        Frequencies in hertz.
+
+    Returns
+    -------
+    numpy.ndarray
+        A-weighting adjustments in decibels.
+    """
 
     f = np.asarray(frequencies_hz, dtype=float)
     f2 = f**2
@@ -87,7 +186,18 @@ def a_weighting(frequencies_hz):
 
 
 def b_weighting(frequencies_hz):
-    """Return B-weighting adjustments in dB."""
+    """Return B-weighting adjustments in dB.
+
+    Parameters
+    ----------
+    frequencies_hz : array_like
+        Frequencies in hertz.
+
+    Returns
+    -------
+    numpy.ndarray
+        B-weighting adjustments in decibels.
+    """
 
     f = np.asarray(frequencies_hz, dtype=float)
     f2 = f**2
@@ -97,7 +207,18 @@ def b_weighting(frequencies_hz):
 
 
 def c_weighting(frequencies_hz):
-    """Return C-weighting adjustments in dB."""
+    """Return C-weighting adjustments in dB.
+
+    Parameters
+    ----------
+    frequencies_hz : array_like
+        Frequencies in hertz.
+
+    Returns
+    -------
+    numpy.ndarray
+        C-weighting adjustments in decibels.
+    """
 
     f = np.asarray(frequencies_hz, dtype=float)
     f2 = f**2
@@ -107,7 +228,18 @@ def c_weighting(frequencies_hz):
 
 
 def d_weighting(frequencies_hz):
-    """Return D-weighting adjustments in dB."""
+    """Return D-weighting adjustments in dB.
+
+    Parameters
+    ----------
+    frequencies_hz : array_like
+        Frequencies in hertz.
+
+    Returns
+    -------
+    numpy.ndarray
+        D-weighting adjustments in decibels.
+    """
 
     f = np.asarray(frequencies_hz, dtype=float)
     h = ((1037918.48 - f**2) ** 2 + 1080768.16 * f**2) / ((9837328.0 - f**2) ** 2 + 11723776.0 * f**2)
