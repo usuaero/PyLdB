@@ -46,6 +46,27 @@ def test_panair_pldb_matches_origin_master():
 
     assert np.allclose(pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
 
+def test_calculate_populates_loudness_results():
+    test_sig_fname = os.path.join("misc", "panair_r1.sig")
+    pldb_instance = PyLdB(test_sig_fname, header_lines=3)
+
+    loudness = pldb_instance.calculate(pad_front=6, pad_rear=6,
+                                       len_window=800, ctl=75.0)
+
+    assert loudness is pldb_instance.loudness
+    assert np.allclose(loudness.pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
+    assert np.isfinite(loudness.ctl)
+    assert loudness.ctl == loudness.ctl_response
+    assert loudness.community_tolerance_level == 75.0
+    assert 0.0 <= loudness.ctl <= 1.0
+    assert np.isfinite(loudness.dnl)
+    assert np.allclose(loudness.equivalent_loudness, loudness.pldb)
+    assert set(loudness.alphabet_weighted_loudnesses) == {"a", "b", "c", "d"}
+    assert np.isfinite(loudness.a_weighted_loudness)
+    assert np.isfinite(loudness.b_weighted_loudness)
+    assert np.isfinite(loudness.c_weighted_loudness)
+    assert np.isfinite(loudness.d_weighted_loudness)
+
 def test_padding_time_shift():
     # Initialize PyLdB instance and set up test data
     instance = PyLdB()

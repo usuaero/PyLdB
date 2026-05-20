@@ -10,10 +10,45 @@ three-line PANAIR header.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
+
+from .acoustics import alphabet_weighted_levels, dnl, equivalent, fidell_ctl
+
+
+@dataclass
+class LoudnessResults:
+    """Container for calculated loudness metrics."""
+
+    pldb: float
+    ctl: float
+    community_tolerance_level: Optional[float]
+    dnl: float
+    equivalent_loudness: float
+    alphabet_weighted_loudnesses: Dict[str, float]
+
+    @property
+    def ctl_response(self) -> float:
+        return self.ctl
+
+    @property
+    def a_weighted_loudness(self) -> float:
+        return self.alphabet_weighted_loudnesses["a"]
+
+    @property
+    def b_weighted_loudness(self) -> float:
+        return self.alphabet_weighted_loudnesses["b"]
+
+    @property
+    def c_weighted_loudness(self) -> float:
+        return self.alphabet_weighted_loudnesses["c"]
+
+    @property
+    def d_weighted_loudness(self) -> float:
+        return self.alphabet_weighted_loudnesses["d"]
 
 
 class PyLdB:
@@ -84,6 +119,7 @@ class PyLdB:
         self.sones: Optional[np.ndarray] = None
         self.total_loudness_sones: Optional[float] = None
         self.perceived_loudness_pldb: Optional[float] = None
+        self.loudness: Optional[LoudnessResults] = None
 
     def import_signature(
         self,
@@ -202,6 +238,73 @@ class PyLdB:
         """Backward-compatible alias for :meth:`perceived_loudness`."""
 
         return self.perceived_loudness(*args, **kwargs)
+
+    def calculate(
+        self,
+        time: Optional[np.ndarray] = None,
+        pressure: Optional[np.ndarray] = None,
+        *,
+        signature_file: Optional[str | Path] = None,
+        header_lines: int = 0,
+        delimiter: Optional[str] = None,
+        pad_front: int = 1,
+        pad_rear: int = 1,
+        len_window: int = 800,
+        ctl: Optional[float] = 75.0,
+        a_star: Optional[float] = None,
+        growth: float = 0.3,
+        day_loudness=None,
+        night_loudness=None,
+        equivalent_loudnesses=None,
+        print_results: bool = False,
+        results_dir: str | Path = "PyLdB_Results",
+    ) -> LoudnessResults:
+        """Calculate PLdB and acoustic post-processing metrics.
+
+        Results are stored on ``self.loudness`` and returned. If DNL or
+        equivalent-level inputs are omitted, the calculated PLdB is used as the
+        representative level.
+        """
+
+        pldb = self.perceived_loudness(
+            time=time,
+            pressure=pressure,
+            signature_file=signature_file,
+            header_lines=header_lines,
+            delimiter=delimiter,
+            pad_front=pad_front,
+            pad_rear=pad_rear,
+            len_window=len_window,
+            print_results=print_results,
+            results_dir=results_dir,
+        )
+
+        if day_loudness is None:
+            day_loudness = pldb
+        if night_loudness is None:
+            night_loudness = pldb
+        if equivalent_loudnesses is None:
+            equivalent_loudnesses = pldb
+
+        alphabet = alphabet_weighted_levels(self.freq_band_center, self.sound_pressure_level)
+        if ctl is None and a_star is not None:
+            community_tolerance_level = float(-10.0 * np.log10(-np.log(0.5)) / growth + a_star / growth)
+        else:
+            community_tolerance_level = ctl
+
+        ctl_response = float(fidell_ctl(pldb, growth=growth, ctl=ctl, a_star=a_star))
+        dnl_value = dnl(day_loudness, night_loudness)
+        equivalent_value = equivalent(equivalent_loudnesses)
+
+        self.loudness = LoudnessResults(
+            pldb=pldb,
+            ctl=ctl_response,
+            community_tolerance_level=community_tolerance_level,
+            dnl=dnl_value,
+            equivalent_loudness=equivalent_value,
+            alphabet_weighted_loudnesses=alphabet,
+        )
+        return self.loudness
 
     def window(self, len_window: int) -> "PyLdB":
         """Apply a symmetric Hann taper to the loaded pressure signature."""
@@ -454,4 +557,4 @@ def perceivedloudness(
     )
 
 
-__all__ = ["PyLdB", "import_sig", "perceivedloudness"]
+__all__ = ["LoudnessResults", "PyLdB", "import_sig", "perceivedloudness"]
