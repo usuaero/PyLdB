@@ -48,7 +48,7 @@ numpy.fft.rfft : Real-input fast Fourier transform (FFT) routine.
 numpy.fft.rfftfreq : Generates the one-sided frequency range for an FFT.
 numpy.argsort : Returns indices to sort an array.
 numpy.nonzero : Returns non-zero elements in an array subject to conditions.
-numpy.trapz : Performs trapezoidal numerical integration.
+numpy.trapezoid : Performs trapezoidal numerical integration.
 
 Notes
 -----
@@ -608,6 +608,7 @@ class PyLdB:
         self.S_1 = float(np.sum(win))
         self.S_1sq = self.S_1**2
         self.S_2 = float(np.sum(np.square(win)))
+        self.clear_results()
         return self
 
     def padding(
@@ -656,7 +657,7 @@ class PyLdB:
 
         original_time = self.sig_time_ms
         original_pressure = self.sig_pressure_psf
-        front_time = np.arange(n_front_points, dtype=float) * dt
+        front_time = original_time[0] + np.arange(n_front_points, dtype=float) * dt
         shifted_time = original_time + n_front_points * dt
         rear_start = shifted_time[-1] + dt
         rear_time = rear_start + np.arange(n_rear_points, dtype=float) * dt
@@ -691,7 +692,7 @@ class PyLdB:
         """Load Stevens loudness and frequency-band tables from disk."""
 
         base_dir = Path(__file__).resolve().parent
-        tables_dir = base_dir.parent / "tables"
+        tables_dir = base_dir / "tables"
 
         equiv_loudness_sones_data = np.genfromtxt(tables_dir / "L_eq_v_sones.csv", delimiter=",", skip_header=1)
         self.equiv_loudness_sones_data = equiv_loudness_sones_data
@@ -757,12 +758,13 @@ class PyLdB:
         auditory response time before conversion to decibels.
         """
 
+        integrate = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         energy = np.zeros(self.num_freq_bands)
 
         for j in range(self.num_freq_bands):
             section = np.nonzero((self.freq_band_lower_lim[j] <= freq) & (freq <= self.freq_band_upper_lim[j]))[0]
             if len(section) > 1:
-                energy[j] = np.trapz(power[section], x=freq[section])
+                energy[j] = integrate(power[section], x=freq[section])
 
         energy /= self.ref_time_s
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -892,7 +894,6 @@ def import_sig(filename: str | Path, header_lines: int = 0, delimiter: Optional[
 def perceivedloudness(
     time: np.ndarray,
     pressure: np.ndarray,
-    *,
     pad_front: int = 1,
     pad_rear: int = 1,
     len_window: int = 800,

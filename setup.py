@@ -10,4 +10,5 @@ setup(name='pyldb',
       author_email='christianrbolander@gmail.com',
       license='MIT',
       packages=['pyldb'],
+      package_data={'pyldb': ['tables/*.csv']},
       zip_safe=False)
