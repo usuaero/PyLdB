@@ -6,3 +6,4 @@
 !LICENSE
 !*.sig
 !/pyldb/tables/*.csv
+!/.github/workflows/tests.yml

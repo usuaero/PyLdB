@@ -1,0 +1,23 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install PyLdB and test dependencies
+        run: python -m pip install . numpy pytest
+      - name: Run tests
+        run: pytest --import-mode=importlib verif/test.py
