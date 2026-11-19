@@ -48,7 +48,7 @@ numpy.fft.rfft : Real-input fast Fourier transform (FFT) routine.
 numpy.fft.rfftfreq : Generates the one-sided frequency range for an FFT.
 numpy.argsort : Returns indices to sort an array.
 numpy.nonzero : Returns non-zero elements in an array subject to conditions.
-numpy.trapz : Performs trapezoidal numerical integration.
+numpy.trapezoid : Performs trapezoidal numerical integration.
 
 Notes
 -----
@@ -758,12 +758,13 @@ class PyLdB:
         auditory response time before conversion to decibels.
         """
 
+        integrate = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         energy = np.zeros(self.num_freq_bands)
 
         for j in range(self.num_freq_bands):
             section = np.nonzero((self.freq_band_lower_lim[j] <= freq) & (freq <= self.freq_band_upper_lim[j]))[0]
             if len(section) > 1:
-                energy[j] = np.trapz(power[section], x=freq[section])
+                energy[j] = integrate(power[section], x=freq[section])
 
         energy /= self.ref_time_s
         with np.errstate(divide="ignore", invalid="ignore"):
