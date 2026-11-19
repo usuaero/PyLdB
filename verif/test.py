@@ -5,7 +5,7 @@ pyldb unit testing
 """
 
 import pytest
-from pyldb.core import PyLdB
+from pyldb import PyLdB, perceivedloudness
 import numpy as np
 import os.path
 
@@ -21,6 +21,8 @@ def test_table_import():
 
     assert np.allclose(sones_table_indep[:5], sones_table_indep_test, rtol=0.0, atol=10e-8)
     assert np.allclose(sum_factor_table[:5], sum_factor_table_test, rtol=0.0, atol=10e-8)
+    assert sum_factor_table[sones_table_indep == 37.3].item() == 0.190
+    assert sones_table_indep[-1] == 256.0
 
 def test_import_sig():
     test_sig_fname = os.path.join("misc", "panair_r1.sig")
@@ -85,6 +87,38 @@ def test_padding_time_shift():
     # Assertions
     np.testing.assert_array_equal(instance.sig_pressure_psf, expected_pressure)
     np.testing.assert_array_equal(instance.sig_time_ms, expected_time)
+
+@pytest.mark.parametrize("offset", [-100.0, 100.0])
+def test_loudness_is_independent_of_start_time(offset):
+    time = np.arange(2000) * 0.01
+    pressure = 0.04 * np.sin(2 * np.pi * time)
+    reference = PyLdB(time=time, pressure=pressure).perceived_loudness(len_window=0)
+    shifted = PyLdB(time=time + offset, pressure=pressure)
+
+    assert shifted.perceived_loudness(len_window=0) == pytest.approx(reference, rel=0, abs=1e-9)
+    np.testing.assert_allclose(np.diff(shifted.sig_time_ms), 0.01, rtol=0, atol=1e-11)
+
+
+def test_legacy_positional_arguments():
+    time = np.arange(2000) * 0.01
+    pressure = 0.04 * np.sin(2 * np.pi * time)
+    expected = perceivedloudness(time, pressure, pad_front=0, pad_rear=2, len_window=10)
+
+    assert perceivedloudness(time, pressure, 0, 2, 10, False) == expected
+
+
+def test_window_invalidates_calculated_results():
+    time = np.arange(2000) * 0.01
+    pressure = 0.04 * np.sin(2 * np.pi * time)
+    instance = PyLdB(time=time, pressure=pressure)
+    instance.calculate(len_window=0)
+
+    instance.window(10)
+
+    assert instance.loudness is None
+    assert instance.power_spectrum is None
+    assert instance.perceived_loudness_pldb is None
+
 
 def test_padding_data_points():
     # Create an instance of PyLdB

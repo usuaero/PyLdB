@@ -5,3 +5,4 @@
 !*.py
 !LICENSE
 !*.sig
+!/pyldb/tables/*.csv
