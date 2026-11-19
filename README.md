@@ -108,6 +108,9 @@ through `calculator.loudness`.
 
 ## Installation
 
+PyLdB requires Python 3.9 or later and NumPy 2.0 or later. Installing PyLdB
+also installs a compatible version of NumPy.
+
 Clone the repository and install it in your Python environment:
 
 ```bash

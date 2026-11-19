@@ -11,4 +11,6 @@ setup(name='pyldb',
       license='MIT',
       packages=['pyldb'],
       package_data={'pyldb': ['tables/*.csv']},
+      python_requires='>=3.9',
+      install_requires=['numpy>=2.0'],
       zip_safe=False)

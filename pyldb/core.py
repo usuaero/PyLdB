@@ -758,13 +758,12 @@ class PyLdB:
         auditory response time before conversion to decibels.
         """
 
-        integrate = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         energy = np.zeros(self.num_freq_bands)
 
         for j in range(self.num_freq_bands):
             section = np.nonzero((self.freq_band_lower_lim[j] <= freq) & (freq <= self.freq_band_upper_lim[j]))[0]
             if len(section) > 1:
-                energy[j] = integrate(power[section], x=freq[section])
+                energy[j] = np.trapezoid(power[section], x=freq[section])
 
         energy /= self.ref_time_s
         with np.errstate(divide="ignore", invalid="ignore"):
