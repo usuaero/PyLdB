@@ -9,14 +9,17 @@ permissions:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - python-version: '3.9'
             numpy: 'numpy==2.0.0'
+            runner: ubuntu-22.04
           - python-version: '3.12'
             numpy: numpy
+            runner: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
