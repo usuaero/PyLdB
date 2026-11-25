@@ -47,18 +47,16 @@ def compare_waveforms():
     bands = []
     for name, time_ms, pressure_pa, taper, padding in waveforms():
         calculator = PyLdB(time=time_ms, pressure=pressure_pa / PA_PER_PSF)
-        # For zero sones the production logarithm returns -inf, reported below.
-        with np.errstate(divide="ignore"):
-            production_pl = calculator.perceived_loudness(
-                len_window=taper, pad_front=padding, pad_rear=padding,
-            )
+        production_pl = calculator.perceived_loudness(
+            len_window=taper, pad_front=padding, pad_rear=padding,
+        )
         spacing = (time_ms[1] - time_ms[0]) / 1000
         energy = reference.third_octave_energy(calculator.sig_pressure_psf * PA_PER_PSF, spacing)
         unadjusted = reference.loudness_from_spl(reference.band_sound_pressure_level(energy))
         ref_spl = reference.band_sound_pressure_level(energy, correction_db=-3)
         matched = reference.loudness_from_spl(ref_spl)
         summaries.append(
-            f"| {name} | {production_pl:.5f} | {matched.pldb:.5f} | {production_pl - matched.pldb:+.5f}"
+            f"| {name} | {production_pl:.5f} | {matched.pldb:.5f} | {production_pl - matched.pldb:+.3e}"
             f" | {unadjusted.pldb:.5f} | {production_pl - unadjusted.pldb:+.5f} |"
         )
 

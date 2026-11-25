@@ -1,4 +1,4 @@
-"""Analytical and published checks for the independent Mark VII reference."""
+"""Compare PyLdB and the independent Mark VII reference with published cases."""
 
 import math
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import mark_vii_reference as reference
-from compare_mark_vii import PA_PER_PSF, nasa_n_wave
+from compare_mark_vii import PA_PER_PSF, nasa_n_wave, waveforms
 from pyldb import PyLdB
 
 
@@ -68,11 +68,17 @@ def test_two_one_sone_bands_use_stevens_summation_factor():
     ],
 )
 def test_nasa_quiet_spectra(spectrum_sones, expected_pldb, published_spl):
-    result = reference.loudness_from_spl(np.array([-np.inf, *published_spl]))
+    band_spl = np.array([-np.inf, *published_spl])
+    result = reference.loudness_from_spl(band_spl)
     assert result.sones[0] == 0
     # The least precise printed SPLs occur in the steepest low-frequency contours.
     np.testing.assert_allclose(result.sones[1:], spectrum_sones, rtol=0, atol=2e-5)
     assert result.pldb == pytest.approx(expected_pldb, abs=0.003)
+
+    calculator = PyLdB()
+    total_sones, sones = calculator._calc_total_loudness(calculator._equivalent_loudness(band_spl))
+    np.testing.assert_allclose(sones, result.sones, rtol=0, atol=1e-12)
+    assert calculator._sones_to_pldb(total_sones) == pytest.approx(expected_pldb, abs=0.003)
 
 
 def test_nasa_quiet_summation_breakpoints():
@@ -84,15 +90,30 @@ def test_nasa_quiet_summation_breakpoints():
     assert reference.sones_to_level(0) == pytest.approx(-3)
     assert reference.level_to_sones(-3) == pytest.approx(0)
 
+    calculator = PyLdB()
+    for peak, factor in [(0, 0), (0.113, 0), (0.147, 0.050), (0.181, 0.100), (0.196, 0.122)]:
+        level = reference.sones_to_level(peak)
+        total_sones, sones = calculator._calc_total_loudness(np.array([level, level]))
+        np.testing.assert_allclose(sones, peak, rtol=0, atol=1e-12)
+        assert total_sones == pytest.approx(peak * (1 + factor), abs=1e-12)
+    assert calculator._sones_to_pldb(0) == pytest.approx(-3)
+    assert calculator._sones_to_pldb(1) == 32
 
-@pytest.mark.parametrize("sample_count", [31, 32])
+
+@pytest.mark.parametrize("sample_count", [2, 3, 31, 32])
 def test_fft_preserves_energy_in_highest_positive_bin(sample_count):
     spacing = 1 / 32000
     sample = np.arange(sample_count)
     pressure = 0.2 + np.cos(2 * np.pi * (sample_count // 2) * sample / sample_count)
-    _, energy = reference.fft_bin_energy(pressure, spacing)
+    expected_frequencies, energy = reference.fft_bin_energy(pressure, spacing)
 
     assert energy.sum() == pytest.approx(spacing * np.dot(pressure, pressure), rel=1e-12)
+
+    calculator = PyLdB(time=sample * spacing * 1000, pressure=pressure)
+    calculator.perceived_loudness(pad_front=0, pad_rear=0, len_window=0)
+    np.testing.assert_allclose(calculator.frequency_hz, expected_frequencies, rtol=1e-12)
+    bin_width = calculator.frequency_hz[1] - calculator.frequency_hz[0]
+    np.testing.assert_allclose(calculator.power_spectrum * bin_width, energy, rtol=1e-12, atol=1e-30)
 
 
 def test_third_octave_bands_above_nyquist_are_empty():
@@ -103,6 +124,13 @@ def test_third_octave_bands_above_nyquist_are_empty():
 
     np.testing.assert_array_equal(energy[above_nyquist], 0)
     assert energy.sum() == pytest.approx(spacing * np.dot(pressure, pressure), rel=1e-12)
+
+    calculator = PyLdB(time=np.arange(len(pressure)) * spacing * 1000, pressure=pressure / PA_PER_PSF)
+    calculator.perceived_loudness(pad_front=0, pad_rear=0, len_window=0)
+    assigned_energy = calculator.band_energy * (0.070 * PA_PER_PSF**2)
+    np.testing.assert_array_equal(assigned_energy[above_nyquist], 0)
+    np.testing.assert_allclose(assigned_energy, energy, rtol=1e-12, atol=1e-30)
+    np.testing.assert_array_equal(calculator.sound_pressure_level[above_nyquist], -np.inf)
 
 
 def test_fft_bin_straddling_a_band_edge_splits_energy_by_overlap():
@@ -117,6 +145,12 @@ def test_fft_bin_straddling_a_band_edge_splits_energy_by_overlap():
     assert energy[20] == pytest.approx((89.5 - edge) * expected_energy, rel=1e-12)
     assert energy.sum() == pytest.approx(expected_energy, rel=1e-12)
 
+    calculator = PyLdB(time=samples / 32, pressure=pressure / PA_PER_PSF)
+    calculator.perceived_loudness(pad_front=0, pad_rear=0, len_window=0)
+    assigned_energy = calculator.band_energy * (0.070 * PA_PER_PSF**2)
+    np.testing.assert_allclose(assigned_energy[19:21], energy[19:21], rtol=1e-12)
+    assert assigned_energy.sum() == pytest.approx(expected_energy, rel=1e-12)
+
 
 def test_bin_centered_reference_band_tone_end_to_end():
     sample_rate = 32000
@@ -130,16 +164,46 @@ def test_bin_centered_reference_band_tone_end_to_end():
     assert result.loudness.pldb == pytest.approx(32, abs=1e-10)
 
 
-def test_pyldb_reference_band_tone_matches_reference_with_same_adjustment():
-    sample_rate = 32000
-    time_s = np.arange(sample_rate) / sample_rate
-    pressure_pa = np.cos(2 * np.pi * 3162 * time_s)
-    exact = reference.perceived_level(pressure_pa, 1 / sample_rate, correction_db=-3)
-    calculator = PyLdB(time=time_s * 1000, pressure=pressure_pa / PA_PER_PSF)
-
-    actual = calculator.perceived_loudness(pad_front=0, pad_rear=0, len_window=0)
+@pytest.mark.parametrize(
+    ("time_ms", "pressure_pa", "taper", "padding"),
+    [pytest.param(*case, id=name) for name, *case in waveforms()],
+)
+def test_pyldb_waveform_matches_reference(time_ms, pressure_pa, taper, padding):
+    calculator = PyLdB(time=time_ms, pressure=pressure_pa / PA_PER_PSF)
+    actual = calculator.perceived_loudness(pad_front=padding, pad_rear=padding, len_window=taper)
+    spacing = (time_ms[1] - time_ms[0]) / 1000
+    exact = reference.perceived_level(calculator.sig_pressure_psf * PA_PER_PSF, spacing, correction_db=-3)
 
     assert actual == pytest.approx(exact.loudness.pldb, abs=0.01)
+
+
+def test_1_hz_contour_limit():
+    calculator = PyLdB()
+    band_spl = np.full(42, -np.inf)
+    for spl, expected_level in [(159, -np.inf), (160, 152), (161, np.inf)]:
+        band_spl[0] = spl
+        equivalent = calculator._equivalent_loudness(band_spl)
+        assert equivalent[0] == expected_level
+        total_sones, sones = calculator._calc_total_loudness(equivalent)
+        assert total_sones == sones[0]
+
+
+def test_zero_pressure_has_zero_sones_and_finite_perceived_level():
+    calculator = PyLdB(time=np.arange(4), pressure=np.zeros(4))
+    with np.errstate(divide="raise", invalid="raise"):
+        pldb = calculator.perceived_loudness(pad_front=0, pad_rear=0, len_window=0)
+    assert calculator.total_loudness_sones == 0
+    assert pldb == pytest.approx(-3)
+
+
+def test_saved_spectrum_uses_the_raw_fft_grid(tmp_path):
+    calculator = PyLdB(time=np.arange(32) / 8, pressure=(-1.0) ** np.arange(32))
+    calculator.perceived_loudness(
+        pad_front=0, pad_rear=0, len_window=0, print_results=True, results_dir=tmp_path,
+    )
+    frequencies, power = np.loadtxt(tmp_path / "power_spec").T
+    np.testing.assert_allclose(frequencies, np.arange(17) * 250.0, rtol=1e-12)
+    np.testing.assert_array_equal(power, calculator.power_spectrum)
 
 
 def test_nasa_n_wave_against_published_analytic_spectrum():

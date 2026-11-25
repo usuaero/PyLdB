@@ -9,6 +9,10 @@ from pyldb import PyLdB, perceivedloudness
 import numpy as np
 import os.path
 
+# Independent reference with the same taper, padding, and band adjustment.
+PANAIR_REFERENCE_PLDB = 77.70673
+
+
 def test_table_import():
 # Get the absolute path of the directory containing this script
     test_sig_fname = os.path.join("misc", "panair_r1.sig")
@@ -16,11 +20,13 @@ def test_table_import():
     pldb_instance._import_sig(test_sig_fname, header_lines=3)
     sones_table_indep = pldb_instance.sones_table_indep
     sum_factor_table = pldb_instance.sum_factor_table
-    sones_table_indep_test = np.array([0.181, 0.196, 0.212, 0.23, 0.248])
-    sum_factor_table_test = np.array([0.1, 0.122, 0.14, 0.158, 0.174])
+    sones_table_indep_test = np.array([0.0, 0.113, 0.181, 0.196, 0.212, 0.23, 0.248])
+    sum_factor_table_test = np.array([0.0, 0.0, 0.1, 0.122, 0.14, 0.158, 0.174])
 
-    assert np.allclose(sones_table_indep[:5], sones_table_indep_test, rtol=0.0, atol=10e-8)
-    assert np.allclose(sum_factor_table[:5], sum_factor_table_test, rtol=0.0, atol=10e-8)
+    np.testing.assert_array_equal(sones_table_indep[:7], sones_table_indep_test)
+    np.testing.assert_array_equal(sum_factor_table[:7], sum_factor_table_test)
+
+    assert sum_factor_table[sones_table_indep == 1.72].item() == 0.317
     assert sum_factor_table[sones_table_indep == 37.3].item() == 0.190
     assert sones_table_indep[-1] == 256.0
 
@@ -39,14 +45,14 @@ def test_import_sig():
     assert np.allclose(pldb_instance.sig_time_ms[:5], time_test, rtol=0.0, atol=10e-12)
     assert np.allclose(pldb_instance.sig_pressure_psf[:5], pressure_test, rtol=0.0, atol=10e-12)
 
-def test_panair_pldb_matches_origin_master():
+def test_panair_pldb_matches_reference():
     test_sig_fname = os.path.join("misc", "panair_r1.sig")
     pldb_instance = PyLdB(test_sig_fname, header_lines=3)
 
     pldb = pldb_instance.perceived_loudness(pad_front=6, pad_rear=6,
                                             len_window=800)
 
-    assert np.allclose(pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
+    assert pldb == pytest.approx(PANAIR_REFERENCE_PLDB, abs=0.01)
 
 def test_calculate_populates_loudness_results():
     test_sig_fname = os.path.join("misc", "panair_r1.sig")
@@ -56,7 +62,7 @@ def test_calculate_populates_loudness_results():
                                        len_window=800, ctl=75.0)
 
     assert loudness is pldb_instance.loudness
-    assert np.allclose(loudness.pldb, 77.67985293502309, rtol=0.0, atol=10e-12)
+    assert loudness.pldb == pytest.approx(PANAIR_REFERENCE_PLDB, abs=0.01)
     assert np.isfinite(loudness.ctl)
     assert loudness.ctl == loudness.ctl_response
     assert loudness.community_tolerance_level == 75.0
