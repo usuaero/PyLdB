@@ -3,7 +3,7 @@
 from setuptools import setup
 
 setup(name='pyldb',
-      version='0.0',
+      version='1.0.0',
       description='A tool for the calculation of the perceived loudness of a pressure signature.',
       url='NA',
       author='cbolander',
