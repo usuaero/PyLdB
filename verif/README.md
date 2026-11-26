@@ -7,8 +7,9 @@ This report compares the current PyLdB calculation with an independent implement
 With PyLdB and pytest installed, run these commands from the repository root.
 
 ```sh
-pytest --import-mode=importlib -o pythonpath=verif verif/test.py verif/test_mark_vii.py
+pytest --import-mode=importlib -o pythonpath=verif verif/test.py verif/test_mark_vii.py verif/test_wavelet.py
 python verif/compare_mark_vii.py
+python verif/compare_wavelet.py
 ```
 
 The comparison prints exposure, SPL, equivalent level, and sones for the loudest bands, as well as the total sones and PLdB. The tests cover FFT energy conservation for odd and even record lengths, the band-edge split, zero energy above Nyquist, and the analytic spectrum of the NASA N-wave. Both implementations are also checked against NASA's three published quiet spectra with a 0.003 PLdB tolerance to account for rounding of the input SPLs. [NASA TM-20250003346, Table 2](https://ntrs.nasa.gov/citations/20250003346)
@@ -36,3 +37,28 @@ All eight cases agree within 0.000002 PLdB with the matched adjustment. The sign
 | 8 kHz sampling | 79.84261 | 79.84261 | −7.358e−7 |
 
 See the [changelog](../CHANGELOG.md) for changes in the reported levels.
+
+## Wavelet verification against PyLdB 1.0.0
+
+**Band sound exposure** is the integral of squared band pressure over time, in **Pa²·s**. A **band exposure timeline** gives the rate at which exposure accumulates, in **Pa²**. Summing the timeline samples and multiplying by the sample interval gives the band's sound exposure. **Sound exposure level** is a separate quantity expressed in decibels. [ASA/ANSI sound exposure](https://asastandards.org/terms/sound-exposure/) · [ASA/ANSI sound exposure level](https://asastandards.org/terms/sound-exposure-level/)
+
+An **FFT bin** is a frequency sample with a finite width for allocating exposure. A **third-octave band** is a frequency range that can contain whole bins and parts of bins. A **wavelet scale** sets the wavelet's duration and center frequency. Its **gain** measures its response to a particular frequency. A **wavelet coefficient** is its response to the processed pressure signal at a particular time. **PLdB** is the perceived level returned by the Mark VII calculation.
+
+1. Use the same tapered and padded pressure record for the FFT baseline and the wavelet calculation. For each band, multiply the complex FFT coefficients by the square root of their fractional overlap with the band. This assigns the intended share of exposure and preserves phase.
+2. Evaluate six Morlet wavelets with centers spaced logarithmically within each band. Normalize the gains at each participating frequency so their squared magnitudes sum to one. Apply those gains to the band coefficients, then take a complex inverse FFT for each wavelet. Multiply bins with a negative-frequency partner by √2 for the one-sided inverse calculation, and count the even-length Nyquist bin once. The zero-frequency bin has no Morlet response, so its assigned share is carried as a constant rate over the record.
+3. Sum the squared response magnitudes at each time and integrate over the full processed record. Parseval's identity and the unit sum of squared gains preserve each band's exposure. Use those recovered exposures with the same 70 ms normalization, −3 dB band adjustment, and Mark VII calculation as the baseline. The FFT totals are used only to compare the results.
+
+All eight waveforms match the FFT baseline to eight decimal places in PLdB. Across all cases, the largest absolute difference in any band's sound exposure was **7.105 × 10⁻¹⁵ Pa²·s** in this run.
+
+| Waveform | FFT PLdB | Wavelet PLdB |
+|---|---:|---:|
+| PANAIR | 77.70672980 | 77.70672980 |
+| PANAIR at 1.0% amplitude | 28.15342894 | 28.15342894 |
+| PANAIR at 0.4% amplitude | 12.14729549 | 12.14729549 |
+| PANAIR at 0.1% amplitude | −3.00000000 | −3.00000000 |
+| NASA N-wave | 89.80950163 | 89.80950163 |
+| Reference-band tone | 99.51811900 | 99.51811900 |
+| Band-edge tone | 81.12387761 | 81.12387761 |
+| 8 kHz sampling | 79.84261149 | 79.84261149 |
+
+The analytical checks verify **1.0 Pa²·s** in the 100 Hz band for one second of 96 Hz and 104 Hz sinusoids, a circular shift of that timeline, and the treatment of zero pressure, zero frequency, and the highest bins of odd and even records. These checks establish full-record agreement. Measuring how accurately the timeline localizes separate events is a further verification step.
