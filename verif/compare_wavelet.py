@@ -1,4 +1,4 @@
-"""Verify full-record Mark VII PLdB from normalized Morlet responses."""
+"""Verify full-record Mark VII PLdB using Morlet filters with normalized gains."""
 
 from dataclasses import dataclass
 from typing import Iterator
@@ -11,19 +11,20 @@ from pyldb import PyLdB
 
 
 def _normalized_morlet_gains(frequencies_hz, lower_hz, upper_hz):
-    """Evaluate six Morlet responses and normalize each frequency column."""
+    """Return amplitude gains indexed by wavelet scale and frequency bin."""
     log_edges = np.linspace(np.log(lower_hz), np.log(upper_hz), 7)
     centers_hz = np.exp((log_edges[:-1] + log_edges[1:]) / 2)
-    omega = 6 * frequencies_hz[np.newaxis, :] / centers_hz[:, np.newaxis]
+    morlet_omega0 = 6.0  # Dimensionless Morlet center frequency.
+    omega = morlet_omega0 * frequencies_hz[np.newaxis, :] / centers_hz[:, np.newaxis]
     # Zero-mean Morlet response at positive frequencies. Work in log space
     # and factor out the largest gain before normalizing each column.
-    log_gain = -0.5 * (omega - 6) ** 2 + np.log(-np.expm1(-6 * omega))
+    log_gain = -0.5 * (omega - morlet_omega0) ** 2 + np.log(-np.expm1(-morlet_omega0 * omega))
     gains = np.exp(log_gain - log_gain.max(axis=0))
     return gains / np.linalg.norm(gains, axis=0)
 
 
 def band_exposure_timelines(pressure_pa, spacing_s) -> Iterator[np.ndarray]:
-    """Yield one exposure timeline in Pa² per band for a processed record."""
+    """Yield one Pa² timeline per band on the processed record's circular DFT grid."""
     sample_count = len(pressure_pa)
     frequencies = np.fft.rfftfreq(sample_count, spacing_s)
     spectrum = np.fft.rfft(pressure_pa)
@@ -31,8 +32,8 @@ def band_exposure_timelines(pressure_pa, spacing_s) -> Iterator[np.ndarray]:
     bin_left = np.maximum(0.0, frequencies - bin_width / 2)
     bin_right = np.minimum(0.5 / spacing_s, frequencies + bin_width / 2)
 
-    # A complex inverse FFT uses only positive frequencies here. Scale paired
-    # bins by sqrt(2) to retain their exposure. DC and even Nyquist are unpaired.
+    # The complex inverse FFT uses the nonnegative-frequency bins here. Scale
+    # paired bins by sqrt(2) to retain exposure. DC and even Nyquist are unpaired.
     paired = slice(1, -1 if sample_count % 2 == 0 else None)
     spectrum[paired] *= np.sqrt(2.0)
 

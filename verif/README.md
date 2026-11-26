@@ -12,7 +12,7 @@ python verif/compare_mark_vii.py
 python verif/compare_wavelet.py
 ```
 
-The comparison prints exposure, SPL, equivalent level, and sones for the loudest bands, as well as the total sones and PLdB. The tests cover FFT energy conservation for odd and even record lengths, the band-edge split, zero energy above Nyquist, and the analytic spectrum of the NASA N-wave. Both implementations are also checked against NASA's three published quiet spectra with a 0.003 PLdB tolerance to account for rounding of the input SPLs. [NASA TM-20250003346, Table 2](https://ntrs.nasa.gov/citations/20250003346)
+The Mark VII comparison prints exposure, SPL, equivalent level, and sones for the loudest bands, as well as the total sones and PLdB. The tests cover FFT energy conservation for odd and even record lengths, the band-edge split, zero energy above Nyquist, and the analytic spectrum of the NASA N-wave. The tests check PyLdB and the independent Mark VII reference against NASA's three published quiet spectra with a 0.003 PLdB tolerance to account for rounding of the input SPLs. [NASA TM-20250003346, Table 2](https://ntrs.nasa.gov/citations/20250003346)
 
 ## Method and inputs
 
@@ -40,13 +40,22 @@ See the [changelog](../CHANGELOG.md) for changes in the reported levels.
 
 ## Wavelet verification against PyLdB 1.0.0
 
-**Band sound exposure** is the integral of squared band pressure over time, in **Pa²·s**. A **band exposure timeline** gives the rate at which exposure accumulates, in **Pa²**. Summing the timeline samples and multiplying by the sample interval gives the band's sound exposure. **Sound exposure level** is a separate quantity expressed in decibels. [ASA/ANSI sound exposure](https://asastandards.org/terms/sound-exposure/) · [ASA/ANSI sound exposure level](https://asastandards.org/terms/sound-exposure-level/)
+**Band sound exposure** is the integral of squared band pressure over time, in **Pa²·s**. A **band exposure timeline** gives the exposure rate at each sample, in **Pa²**. Multiply the sum of the timeline samples by the sample interval to recover the exposure. **Sound exposure level** expresses exposure relative to a reference in decibels. **PLdB** is the perceived level from the Mark VII calculation. [ASA/ANSI sound exposure](https://asastandards.org/terms/sound-exposure/) · [ASA/ANSI sound exposure level](https://asastandards.org/terms/sound-exposure-level/)
 
-An **FFT bin** is a frequency sample with a finite width for allocating exposure. A **third-octave band** is a frequency range that can contain whole bins and parts of bins. A **wavelet scale** sets the wavelet's duration and center frequency. Its **gain** measures its response to a particular frequency. A **wavelet coefficient** is its response to the processed pressure signal at a particular time. **PLdB** is the perceived level returned by the Mark VII calculation.
+### From frequency bins to a timeline
 
-1. Use the same tapered and padded pressure record for the FFT baseline and the wavelet calculation. For each band, multiply the complex FFT coefficients by the square root of their fractional overlap with the band. This assigns the intended share of exposure and preserves phase.
-2. Evaluate six Morlet wavelets with centers spaced logarithmically within each band. Normalize the gains at each participating frequency so their squared magnitudes sum to one. Apply those gains to the band coefficients, then take a complex inverse FFT for each wavelet. Multiply bins with a negative-frequency partner by √2 for the one-sided inverse calculation, and count the even-length Nyquist bin once. The zero-frequency bin has no Morlet response, so its assigned share is carried as a constant rate over the record.
-3. Sum the squared response magnitudes at each time and integrate over the full processed record. Parseval's identity and the unit sum of squared gains preserve each band's exposure. Use those recovered exposures with the same 70 ms normalization, −3 dB band adjustment, and Mark VII calculation as the baseline. The FFT totals are used only to compare the results.
+1. **Assign exposure to a band.** Both calculations start with the same tapered and padded pressure record. An FFT bin is one frequency sample that represents a small frequency interval. Each third-octave band receives the fraction of the bin's interval that overlaps the band. If that fraction is 60%, multiply the complex bin amplitude by $\sqrt{0.60}$. Its squared magnitude then drops to 60% of the original, assigning 60% of the bin's exposure to that band while preserving phase.
+2. **Split the band coefficients among six wavelets.** Start with six Morlet-shaped frequency responses whose center frequencies are spaced logarithmically within the band. Evaluate each wavelet's **gain** at each participating FFT frequency. In this matrix, each column is a frequency bin and each row is a wavelet. Divide each column by the square root of the sum of its squared gains so the six squared gains sum to one. The squared gain is the wavelet's share of the exposure assigned to that bin in this band. The gain matrix depends on the FFT grid and the chosen wavelets. The measured FFT exposure totals are used only for comparison.
+3. **Return to the time axis.** Multiply the band's complex FFT coefficients by each row of gains and take one inverse FFT per wavelet. The new matrix contains **wavelet coefficients**. Each row is still a wavelet, but each column is now a sample time. At each time, sum the squared magnitudes down the column to get one exposure rate for the band.
+4. **Recover full-record exposure and PLdB.** Parseval's identity equates the sum of squared magnitudes in time to the corresponding sum in frequency, with FFT scaling accounted for. Since the squared gains at every bin sum to one, integrating the timeline over the record recovers exactly the band's assigned exposure in exact arithmetic. Apply the same 70 ms normalization, −3 dB band adjustment, and Mark VII calculation as the baseline.
+
+The inverse transforms use just the one-sided spectrum. Multiplying positive-frequency bins with a negative-frequency partner by $\sqrt{2}$ restores their two-sided exposure. The even-length Nyquist bin has no separate partner and is counted once. The Morlet wavelets have zero gain at zero frequency, so any assigned exposure from the zero-frequency bin is carried as a constant rate over the record.
+
+### Two-sinusoid example
+
+A one-second pressure record contains 96 Hz and 104 Hz sinusoids, each with a peak amplitude of 1 Pa. The 104 Hz sinusoid starts with a 60° phase offset. Both FFT bins lie entirely in the nominal 100 Hz band. Each sinusoid contributes 0.5 Pa²·s, so the band contains **1.0 Pa²·s**. The six wavelets split each bin's exposure among their responses. The exposure timeline beats at the 8 Hz difference frequency as the sinusoids reinforce and partly cancel. The test checks the rate at each sample against the expected beat, including its phase and amplitude. The average rate is 1 Pa², so its integral is still 1.0 Pa²·s.
+
+### Results
 
 All eight waveforms match the FFT baseline to eight decimal places in PLdB. Across all cases, the largest absolute difference in any band's sound exposure was **7.105 × 10⁻¹⁵ Pa²·s** in this run.
 
@@ -61,4 +70,4 @@ All eight waveforms match the FFT baseline to eight decimal places in PLdB. Acro
 | Band-edge tone | 81.12387761 | 81.12387761 |
 | 8 kHz sampling | 79.84261149 | 79.84261149 |
 
-The analytical checks verify **1.0 Pa²·s** in the 100 Hz band for one second of 96 Hz and 104 Hz sinusoids, a circular shift of that timeline, and the treatment of zero pressure, zero frequency, and the highest bins of odd and even records. These checks establish full-record agreement. Measuring how accurately the timeline localizes separate events is a further verification step.
+The analytical checks verify the two-sinusoid exposure and beat, the timeline's response to a circular shift, and the treatment of zero pressure, zero frequency, and the highest bins of odd and even records. The FFT treats the processed record as periodic, so the circular-shift test moves samples that pass one end to the other. Whole-record conservation holds even when a wavelet spreads exposure over neighboring times. Checking how accurately the timeline locates a brief event is a separate test. A time–frequency sensitivity map would also need the Mark VII response to a change in each band's sound exposure.

@@ -8,11 +8,12 @@ from compare_wavelet import band_exposure_timelines, compare_waveform
 from mark_vii_reference import BAND_EDGES_HZ
 
 
-def test_two_sinusoids_preserve_exposure_and_shift_the_timeline():
+def test_two_sinusoids_match_the_analytic_beat_envelope_and_shift():
     sample_rate = 1024
     dt = 1 / sample_rate
     time = np.arange(sample_rate) * dt
-    pressure = np.cos(2 * np.pi * 96 * time) + np.cos(2 * np.pi * 104 * time)
+    phase = np.pi / 3
+    pressure = np.cos(2 * np.pi * 96 * time) + np.cos(2 * np.pi * 104 * time + phase)
     timelines = np.array(list(band_exposure_timelines(pressure, dt)))
     shifted = np.array(list(band_exposure_timelines(np.roll(pressure, 37), dt)))
     expected_exposure = np.zeros(len(BAND_EDGES_HZ) - 1)
@@ -20,7 +21,13 @@ def test_two_sinusoids_preserve_exposure_and_shift_the_timeline():
 
     np.testing.assert_allclose(dt * timelines.sum(axis=1), expected_exposure, rtol=1e-12, atol=1e-24)
     np.testing.assert_allclose(shifted, np.roll(timelines, 37, axis=1), rtol=1e-12, atol=1e-14)
-    assert np.ptp(timelines[20]) > 1.0  # The combined response varies in time.
+
+    # The exposure rate beats at 104 - 96 Hz. Its modulation depth is the dot
+    # product of the unit gain columns, evaluated independently from the
+    # direct Morlet response exp(-(omega - 6)**2/2) - exp(-18 - omega**2/2).
+    modulation_depth = 0.9840268621671607
+    expected_timeline = 1 + modulation_depth * np.cos(2 * np.pi * 8 * time + phase)
+    np.testing.assert_allclose(timelines[20], expected_timeline, atol=1e-12, rtol=0)
 
 
 @pytest.mark.parametrize(
