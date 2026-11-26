@@ -64,6 +64,40 @@ results = calculator.calculate(pad_front=10, pad_rear=10)
 The input arrays must be one-dimensional, equal length, strictly increasing in
 time, and evenly sampled.
 
+## Wavelet Sound Exposure
+
+Set `method="wavelet"` to calculate perceived level and obtain the sound
+exposure rate in each one-third-octave band. Sound exposure is the time
+integral of squared sound pressure and has units of Pa²·s. The exposure rate
+has units of Pa². Each row of `exposure_rate_pa2` corresponds to a band center,
+and each column corresponds to a sample of the processed signature. Summing a
+row and multiplying by the sample interval in seconds gives the corresponding
+value in `band_exposure_pa2_s`.
+
+```python
+import matplotlib.pyplot as plt
+from pyldb import PyLdB
+
+calculator = PyLdB("misc/panair_r1.sig", header_lines=3)
+results = calculator.calculate(method="wavelet", pad_front=6, pad_rear=6, len_window=800)
+print(results.pldb)
+
+exposure = calculator.wavelet_exposure
+band = exposure.band_center_hz.tolist().index(100.0)
+print(exposure.band_exposure_pa2_s[band])
+plt.plot(exposure.time_ms, exposure.exposure_rate_pa2[band])
+plt.xlabel("Processed time (ms)")
+plt.ylabel("100 Hz band exposure rate (Pa²)")
+plt.show()
+```
+
+The calculation uses the same taper and padding as `method="fft"`, the
+default. Front padding shifts the original samples later on the processed time
+axis. The FFT treats the padded record as periodic, so a wavelet response can
+extend into the padding or wrap around the record ends. Its spread in time
+depends on the wavelet scale. The full-record exposure in each band yields
+the same PLdB within numerical precision. [Calculation procedure and verification](verif/README.md#wavelet-verification)
+
 ## Acoustic Metrics
 
 `calculate()` computes PLdB first, then uses the acoustic helper methods to
@@ -124,7 +158,7 @@ pip install -e .
 Unit tests are implemented with `pytest`:
 
 ```bash
-pytest verif/test.py
+pytest --import-mode=importlib -o pythonpath=verif verif/test.py verif/test_mark_vii.py verif/test_wavelet.py
 ```
 
 ## Notes

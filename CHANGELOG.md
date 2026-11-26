@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `method="wavelet"` to the PyLdB class to calculate Mark VII PLdB and return one-third-octave sound exposure rates on the processed time grid through `wavelet_exposure`.
+
 ## 1.0.0
 
 ### Fixed
