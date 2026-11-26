@@ -94,16 +94,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 import numpy as np
 
+from ._wavelet import _band_exposure_rate
 from .acoustics import alphabet_weighted_levels, dnl, equivalent, fidell_ctl
 
 
 # Endpoints of Klos (2025), Eqs. (3)–(4), in linear mean-square pressure ratios.
 _ZERO_SONE_PRESSURE_RATIO = 10.0 ** (-0.3)
 _ONE_SONE_PRESSURE_RATIO = 10.0 ** 3.2
+_PA_PER_PSF = 4.4482216152605 / 0.3048**2
 
 
 @dataclass
@@ -160,6 +162,30 @@ class LoudnessResults:
         return self.alphabet_weighted_loudnesses["d"]
 
 
+@dataclass(frozen=True)
+class WaveletExposure:
+    """Sound exposure resolved by one-third-octave band and sample time.
+
+    Attributes
+    ----------
+    time_ms : numpy.ndarray
+        Time samples of the processed signature in milliseconds, including padding.
+    band_center_hz : numpy.ndarray
+        Nominal band center frequencies in hertz, in ascending order.
+    exposure_rate_pa2 : numpy.ndarray
+        Sound exposure rate in Pa², with one row per band and one column per
+        processed sample.
+    band_exposure_pa2_s : numpy.ndarray
+        Sound exposure in Pa²·s for each band. Multiply the sum of each row of
+        the exposure rate by the sample interval in seconds to obtain this value.
+    """
+
+    time_ms: np.ndarray
+    band_center_hz: np.ndarray
+    exposure_rate_pa2: np.ndarray
+    band_exposure_pa2_s: np.ndarray
+
+
 class PyLdB:
     """Object-oriented perceived loudness calculator.
 
@@ -191,6 +217,8 @@ class PyLdB:
         Active pressure signature in pounds per square foot.
     loudness : LoudnessResults or None
         Result container populated by :meth:`calculate`.
+    wavelet_exposure : WaveletExposure or None
+        Band sound exposure and its time dependence from a wavelet calculation.
 
     Examples
     --------
@@ -243,6 +271,7 @@ class PyLdB:
         self.S_1 = 1.0
         self.S_1sq = 1.0
         self.S_2 = 1.0
+        self.wavelet_exposure: Optional[WaveletExposure] = None
 
     def clear_results(self) -> None:
         """Remove previously calculated intermediate and final results.
@@ -261,6 +290,7 @@ class PyLdB:
         self.total_loudness_sones: Optional[float] = None
         self.perceived_loudness_pldb: Optional[float] = None
         self.loudness: Optional[LoudnessResults] = None
+        self.wavelet_exposure = None
 
     def import_signature(
         self,
@@ -372,6 +402,7 @@ class PyLdB:
         pad_front: int = 1,
         pad_rear: int = 1,
         len_window: int = 800,
+        method: str = "fft",
         print_results: bool = False,
         results_dir: str | Path = "PyLdB_Results",
     ) -> float:
@@ -386,10 +417,11 @@ class PyLdB:
         resolution of the FFT output.
 
         Using the windowed and zero-padded pressure and time arrays, a
-        one-sided power spectrum is produced. FFT bin energy is allocated by
-        overlap with the exact base-10 one-third-octave bands. Band energy is
-        normalized over 70 ms, converted to decibels, and reduced by 3 dB
-        for the two-pulse boom convention.
+        one-sided spectrum is produced. FFT bins are allocated by overlap with
+        the exact base-10 one-third-octave bands. The wavelet method obtains the
+        band sound exposure by integrating the exposure rate in time. Both
+        methods normalize exposure over 70 ms, convert it to decibels, and
+        subtract 3 dB for the two-pulse boom convention.
 
         Stevens' Mark VII algorithm transforms the sound pressure levels for
         each frequency band into an equivalent loudness value with a 3150 Hz
@@ -426,6 +458,9 @@ class PyLdB:
             first ``len_window`` pressure values are multiplied by the first
             half of a ``2 * len_window`` Hanning window, and the last
             ``len_window`` pressure values are multiplied by the second half.
+        method : {"fft", "wavelet"}, optional
+            Defaults to ``"fft"``. Use ``"wavelet"`` to calculate band exposure
+            from Morlet wavelet responses and populate ``self.wavelet_exposure``.
         print_results : bool, optional
             Defaults to False. If True, writes the padded/windowed signature,
             power spectrum, sound pressure levels, equivalent loudness values,
@@ -446,6 +481,9 @@ class PyLdB:
         >>> pldb = calculator.perceived_loudness(pad_front=6, pad_rear=6)
         """
 
+        if method not in ("fft", "wavelet"):
+            raise ValueError("Method must be 'fft' or 'wavelet'.")
+
         if signature_file is not None:
             self.import_signature(signature_file, header_lines=header_lines, delimiter=delimiter)
         elif time is not None or pressure is not None:
@@ -465,11 +503,15 @@ class PyLdB:
             self.window(len_window)
         self.padding(n_front_points=self.n_data_points * pad_front, n_rear_points=self.n_data_points * pad_rear)
 
-        self.frequency_hz, self.power_spectrum = self._power_spectrum()
-        self.band_energy, self.sound_pressure_level = self._sound_pressure_levels(
-            self.frequency_hz,
-            self.power_spectrum,
-        )
+        fft_values = np.fft.rfft(self.sig_pressure_psf)
+        self.frequency_hz, self.power_spectrum = self._power_spectrum(fft_values)
+        if method == "wavelet":
+            exposure = self._wavelet_band_exposure(fft_values)
+            self.band_energy, self.sound_pressure_level = self._exposure_to_levels(exposure)
+        else:
+            self.band_energy, self.sound_pressure_level = self._sound_pressure_levels(
+                self.frequency_hz, self.power_spectrum,
+            )
         self.equivalent_loudness = self._equivalent_loudness(self.sound_pressure_level)
         self.total_loudness_sones, self.sones = self._calc_total_loudness(self.equivalent_loudness)
         self.perceived_loudness_pldb = self._sones_to_pldb(self.total_loudness_sones)
@@ -495,6 +537,7 @@ class PyLdB:
         pad_front: int = 1,
         pad_rear: int = 1,
         len_window: int = 800,
+        method: str = "fft",
         ctl: Optional[float] = 75.0,
         a_star: Optional[float] = None,
         growth: float = 0.3,
@@ -515,7 +558,7 @@ class PyLdB:
         Parameters
         ----------
         time, pressure, signature_file, header_lines, delimiter, pad_front,
-        pad_rear, len_window, print_results, results_dir
+        pad_rear, len_window, method, print_results, results_dir
             Passed through to :meth:`perceived_loudness`.
         ctl : float or None, optional
             Community Tolerance Level used by the Fidell response model.
@@ -550,6 +593,7 @@ class PyLdB:
             pad_front=pad_front,
             pad_rear=pad_rear,
             len_window=len_window,
+            method=method,
             print_results=print_results,
             results_dir=results_dir,
         )
@@ -721,43 +765,70 @@ class PyLdB:
         self.freq_band_upper_lim = freq_band_data[:, 2]
         self.num_freq_bands = len(self.freq_band_center)
 
-    def _power_spectrum(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _paired_bins(self) -> slice:
+        """Select positive-frequency bins with a distinct negative-frequency partner."""
+        return slice(1, -1 if self.n_data_points % 2 == 0 else None)
+
+    def _power_spectrum(self, fft_values: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Return raw one-sided FFT frequencies and exposure density."""
 
         self._require_signature()
 
         dt_s = self.dt_s
-        fft_values = np.fft.rfft(self.sig_pressure_psf)
+        if fft_values is None:
+            fft_values = np.fft.rfft(self.sig_pressure_psf)
         freq = np.fft.rfftfreq(self.n_data_points, d=dt_s)
         power = np.abs(fft_values) ** 2 * dt_s**2
 
-        # Only bins with a distinct negative-frequency partner are doubled.
-        paired_bins = slice(1, -1 if self.n_data_points % 2 == 0 else None)
-        power[paired_bins] *= 2.0
+        power[self._paired_bins()] *= 2.0
         return freq, power
 
-    def _sound_pressure_levels(self, freq: np.ndarray, power: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Allocate FFT bin energy by frequency overlap and calculate band SPL.
-
-        Band exposure is divided by the 0.07 second auditory response time
-        before conversion to decibels.
-        """
-
+    def _band_bin_fractions(self, freq: np.ndarray) -> Iterator[Tuple[Tuple[float, float], slice, np.ndarray]]:
+        """Yield each band's edges, overlapping bins, and overlap fractions."""
         bin_width = freq[1] - freq[0]
         bin_left = np.maximum(0.0, freq - bin_width / 2)
         bin_right = np.minimum(0.5 / self.dt_s, freq + bin_width / 2)
-        bin_energy = power * bin_width
-        energy = np.zeros(self.num_freq_bands)
 
-        for index, (lower, upper) in enumerate(zip(self.freq_band_lower_lim, self.freq_band_upper_lim)):
+        for lower, upper in zip(self.freq_band_lower_lim, self.freq_band_upper_lim):
             start = np.searchsorted(bin_right, lower, side="right")
             stop = np.searchsorted(bin_left, upper)
             bins = slice(start, stop)
             overlap = np.minimum(bin_right[bins], upper) - np.maximum(bin_left[bins], lower)
             fraction = overlap / (bin_right[bins] - bin_left[bins])
-            energy[index] = np.dot(bin_energy[bins], fraction)
+            yield (lower, upper), bins, fraction
 
-        energy /= self.ref_time_s
+    def _sound_pressure_levels(self, freq: np.ndarray, power: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Allocate FFT bin exposure by frequency overlap and calculate band SPL."""
+        bin_exposure = power * (freq[1] - freq[0])
+        exposure = np.array([
+            np.dot(bin_exposure[bins], fraction)
+            for _, bins, fraction in self._band_bin_fractions(freq)
+        ])
+        return self._exposure_to_levels(exposure)
+
+    def _wavelet_band_exposure(self, fft_values: np.ndarray) -> np.ndarray:
+        """Integrate the wavelet rates in psf²·s and retain the timelines in SI units."""
+        spectrum = fft_values.copy()
+        # The complex inverse FFT uses only the nonnegative frequencies.
+        spectrum[self._paired_bins()] *= np.sqrt(2.0)
+        rates = np.empty((self.num_freq_bands, self.n_data_points))
+        for index, (band, bins, fraction) in enumerate(self._band_bin_fractions(self.frequency_hz)):
+            rates[index] = _band_exposure_rate(
+                spectrum, self.frequency_hz, self.n_data_points, band, bins, fraction,
+            )
+        exposure = rates.sum(axis=1) * self.dt_s
+        rates *= _PA_PER_PSF**2
+        self.wavelet_exposure = WaveletExposure(
+            time_ms=self.sig_time_ms.copy(),
+            band_center_hz=self.freq_band_center.copy(),
+            exposure_rate_pa2=rates,
+            band_exposure_pa2_s=exposure * _PA_PER_PSF**2,
+        )
+        return exposure
+
+    def _exposure_to_levels(self, exposure: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalize exposure over the auditory response time and calculate band SPL."""
+        energy = exposure / self.ref_time_s
         with np.errstate(divide="ignore", invalid="ignore"):
             loudness = 10.0 * np.log10(energy / (self.ref_pressure_psf**2)) - 3.0
         return energy, loudness
@@ -917,4 +988,4 @@ def perceivedloudness(
     )
 
 
-__all__ = ["LoudnessResults", "PyLdB", "import_sig", "perceivedloudness"]
+__all__ = ["LoudnessResults", "PyLdB", "WaveletExposure", "import_sig", "perceivedloudness"]

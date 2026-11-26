@@ -38,9 +38,9 @@ All eight cases agree within 0.000002 PLdB with the matched adjustment. The sign
 
 See the [changelog](../CHANGELOG.md) for changes in the reported levels.
 
-## Wavelet verification against PyLdB 1.0.0
+## Wavelet verification
 
-The wavelet procedure is evaluated by comparing the sound exposure in each one-third-octave band and the resulting perceived level (PLdB) with the values calculated by PyLdB 1.0.0 for the same pressure signature. In both calculations, band sound exposure is the time integral of squared band pressure and has units of Pa²·s. The band exposure timeline gives the exposure rate, in Pa², at each sample. Sound exposure level expresses exposure relative to a reference in decibels. [ASA/ANSI sound exposure](https://asastandards.org/terms/sound-exposure/) · [ASA/ANSI sound exposure level](https://asastandards.org/terms/sound-exposure-level/)
+The verification compares the sound exposure in each one-third-octave band and the resulting perceived level (PLdB) from `method="wavelet"` and `method="fft"` for the same pressure signature. Band sound exposure is the time integral of squared band pressure and has units of Pa²·s. The band exposure timeline gives the exposure rate, in Pa², at each sample. Sound exposure level expresses exposure relative to a reference in decibels. [ASA/ANSI sound exposure](https://asastandards.org/terms/sound-exposure/) · [ASA/ANSI sound exposure level](https://asastandards.org/terms/sound-exposure-level/)
 
 ### Calculation procedure
 
@@ -58,7 +58,7 @@ $$
 E_j = \Delta t \sum_{n=0}^{N-1} q_j[n],
 $$
 
-where $\Delta t$ is the sample interval. By Parseval's identity, the time-domain sum of squares and the corresponding frequency-domain sum agree when the FFT scaling is included. Since the squared gains sum to unity at each bin, $E_j$ equals the exposure assigned to band $j$ in exact arithmetic. The recovered band exposures are used to calculate PLdB with the same 70 ms normalization, −3 dB band adjustment, and Mark VII procedure as PyLdB 1.0.0. [Bolander et al., 2019, Eqs. (6)–(10)](https://doi.org/10.2514/6.2019-2091)
+where $\Delta t$ is the sample interval. By Parseval's identity, the time-domain sum of squares and the corresponding frequency-domain sum agree when the FFT scaling is included. Since the squared gains sum to unity at each bin, $E_j$ equals the exposure assigned to band $j$ in exact arithmetic. Both methods use the same 70 ms normalization, −3 dB band adjustment, and Mark VII procedure. [Bolander et al., 2019, Eqs. (6)–(10)](https://doi.org/10.2514/6.2019-2091)
 
 ### Two-sinusoid example
 
@@ -68,7 +68,7 @@ A beat is the periodic increase and decrease in the combined response as two sin
 
 ### Results
 
-The wavelet and baseline FFT calculations agree to eight decimal places in PLdB for all eight verification waveforms. The maximum absolute difference in band sound exposure over these cases was 7.105 × 10⁻¹⁵ Pa²·s.
+The wavelet and baseline FFT calculations agree to eight decimal places in PLdB for all eight verification waveforms. The maximum absolute difference in band sound exposure over these cases was 1.421 × 10⁻¹⁴ Pa²·s.
 
 | Waveform | FFT PLdB | Wavelet PLdB |
 |---|---:|---:|
