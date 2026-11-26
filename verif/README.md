@@ -53,7 +53,9 @@ The inverse transforms use just the one-sided spectrum. Multiplying positive-fre
 
 ### Two-sinusoid example
 
-A one-second pressure record contains 96 Hz and 104 Hz sinusoids, each with a peak amplitude of 1 Pa. The 104 Hz sinusoid starts with a 60° phase offset. Both FFT bins lie entirely in the nominal 100 Hz band. Each sinusoid contributes 0.5 Pa²·s, so the band contains **1.0 Pa²·s**. The six wavelets split each bin's exposure among their responses. The exposure timeline beats at the 8 Hz difference frequency as the sinusoids reinforce and partly cancel. The test checks the rate at each sample against the expected beat, including its phase and amplitude. The average rate is 1 Pa², so its integral is still 1.0 Pa²·s.
+A one-second pressure record contains 96 Hz and 104 Hz sinusoids, each with a peak amplitude of 1 Pa. The 104 Hz sinusoid starts with a 60° phase offset. Both FFT bins lie entirely in the nominal 100 Hz band. Each sinusoid contributes 0.5 Pa²·s, so the band contains **1.0 Pa²·s**. The six wavelets split each bin's exposure among their responses.
+
+A **beat** is the repeating rise and fall that occurs when two sinusoids of nearby frequencies alternately reinforce and partly cancel each other. Here the frequencies differ by 8 Hz, so the exposure timeline repeats every 125 ms. The test checks the rate at each sample against the expected beat, including its phase and amplitude. The average rate is 1 Pa², so its integral is still 1.0 Pa²·s.
 
 ### Results
 
